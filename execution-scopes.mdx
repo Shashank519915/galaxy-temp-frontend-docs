@@ -1,0 +1,81 @@
+---
+title: Execution scopes
+description: full, partial, and single run modes for the public runs API.
+---
+
+`POST /api/v1/runs` accepts a `scope` field (default `full`). The orchestrator (`trigger/workflowOrchestrator.ts`) uses it to decide which canvas nodes execute.
+
+## `full`
+
+Runs **all nodes** in the workflow graph (topological order).
+
+```json
+{
+  "workflowId": "clxwf…",
+  "scope": "full",
+  "inputValues": {
+    "field_text_default": "Prompt text"
+  }
+}
+```
+
+Credit hold uses `estimateWorkflowCost` over **every** node in the workflow.
+
+## `partial` and `single`
+
+Both require `nodeIds` — an array of canvas node IDs to target.
+
+| Scope | Behavior |
+| --- | --- |
+| `partial` | Executes the target nodes **and dependencies** (upstream nodes needed for inputs), respecting `existingOutputs` for nodes already satisfied. |
+| `single` | Same dependency expansion as `partial` in the current orchestrator—use when re-running one branch with cached upstream outputs. |
+
+Example partial rerun:
+
+```json
+{
+  "workflowId": "clxwf…",
+  "scope": "partial",
+  "nodeIds": ["gpt-image-node-1"],
+  "inputValues": {},
+  "existingOutputs": {
+    "request-inputs": {
+      "field_text_default": "Cached prompt"
+    }
+  }
+}
+```
+
+`existingOutputs` keys are **node IDs** (e.g. `request-inputs`), not field IDs.
+
+## Request-Inputs overlay
+
+`inputValues` is merged at run start into the Request-Inputs node. Keys must match field `id` values in `node.data.fields` (default scaffold uses `field_text_default`).
+
+Playground field typing in the frontend (`lib/request-inputs.ts`) maps:
+
+| Field type prefix / type | Kind |
+| --- | --- |
+| `text_field`, `text` | string |
+| `number_field` | number |
+| `boolean_field` | boolean |
+| `image_field` (multi) | string URL array |
+| `video_field`, `audio_field`, `file_field` | string URL |
+
+## Concurrency guard
+
+Only **one** `running` workflow run per workflow is allowed. A second `POST /api/v1/runs` returns:
+
+```json
+{
+  "error": "A run is already in progress for this workflow",
+  "runId": "clxrun…"
+}
+```
+
+HTTP **409**.
+
+## Polling vs webhooks
+
+- **Poll:** `GET /api/v1/runs/{id}` until `status` ∈ `success` \| `failed` \| `partial`.
+- **Push:** configure `webhookUrl` on the workflow (dashboard) — see [Webhooks](/webhooks).

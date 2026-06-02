@@ -1,0 +1,588 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Galaxy Public REST API",
+    "version": "1.0.0",
+    "description": "Versioned public API (`/api/v1/*`) for listing workflows, triggering DAG runs, polling execution status, and reading credit balance. All routes require a Bearer API key verified via Unkey (production) or a local SHA-256 hash match for `gx_mock_*` keys (development)."
+  },
+  "servers": [
+    {
+      "url": "{baseUrl}",
+      "description": "API base URL — point this at your running **galaxy-temp-backend** Next.js server.",
+      "variables": {
+        "baseUrl": {
+          "default": "http://localhost:3000",
+          "description": "Local backend (`pnpm dev` in galaxy-temp-backend). Change port if your `.env` uses another host."
+        }
+      }
+    }
+  ],
+  "tags": [
+    { "name": "Workflows", "description": "Create and manage workflow canvases (React Flow graphs)." },
+    { "name": "Runs", "description": "Start asynchronous executions and poll node-level results." },
+    { "name": "Credits", "description": "Read microcredit balance for the authenticated user." }
+  ],
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/api/v1/workflows": {
+      "get": {
+        "tags": ["Workflows"],
+        "operationId": "listWorkflows",
+        "summary": "List workflows",
+        "description": "Returns workflow metadata for the authenticated user. Does not include full `nodes` / `edges` blobs — use `GET /api/v1/workflows/{id}` for the graph.",
+        "responses": {
+          "200": {
+            "description": "Workflow list",
+            "headers": {
+              "X-RateLimit-Limit": { "schema": { "type": "string" } },
+              "X-RateLimit-Remaining": { "schema": { "type": "string" } },
+              "X-RateLimit-Reset": { "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WorkflowListResponse" },
+                "example": {
+                  "data": [
+                    {
+                      "id": "clxwf0000000001",
+                      "name": "Image pipeline",
+                      "description": null,
+                      "status": "idle",
+                      "createdAt": "2026-06-01T12:00:00.000Z",
+                      "updatedAt": "2026-06-01T12:30:00.000Z",
+                      "_count": { "runs": 3 }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Workflows"],
+        "operationId": "createWorkflow",
+        "summary": "Create workflow",
+        "description": "Creates a workflow owned by the caller with default **Request-Inputs** and **Response** nodes (`requestInputs` + `response`). No edges are created by default.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateWorkflowRequest" },
+              "example": {
+                "name": "My Image Pipeline",
+                "description": "GPT Image 2 → Response"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Workflow created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WorkflowResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/api/v1/workflows/{id}": {
+      "get": {
+        "tags": ["Workflows"],
+        "operationId": "getWorkflow",
+        "summary": "Get workflow",
+        "parameters": [{ "$ref": "#/components/parameters/WorkflowId" }],
+        "responses": {
+          "200": {
+            "description": "Full workflow including nodes and edges",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WorkflowResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "put": {
+        "tags": ["Workflows"],
+        "operationId": "updateWorkflow",
+        "summary": "Update workflow",
+        "description": "Partial update. If `nodes` is sent, the graph must be non-empty and include both `requestInputs` and `response` node types (same validation as the dashboard autosave).",
+        "parameters": [{ "$ref": "#/components/parameters/WorkflowId" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateWorkflowRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated workflow",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WorkflowResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Workflows"],
+        "operationId": "deleteWorkflow",
+        "summary": "Delete workflow",
+        "parameters": [{ "$ref": "#/components/parameters/WorkflowId" }],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": { "id": { "type": "string" } },
+                      "required": ["id"]
+                    }
+                  }
+                },
+                "example": { "data": { "id": "clxwf0000000001" } }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/api/v1/runs": {
+      "post": {
+        "tags": ["Runs"],
+        "operationId": "createRun",
+        "summary": "Start workflow run",
+        "description": "Starts an asynchronous run: estimates credit cost from node definitions, places a **hold** on the user's balance, creates a `workflowRun` row, triggers the `workflow-orchestrator` Trigger.dev task, and emits `run.started` if a webhook URL is configured on the workflow.\n\nReturns **202 Accepted** with `runId` and `orchestratorRunId`. Poll `GET /api/v1/runs/{id}` until `status` is terminal.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateRunRequest" },
+              "example": {
+                "workflowId": "clxwf0000000001",
+                "scope": "full",
+                "inputValues": {
+                  "field_text_default": "A retro synthwave racing car at sunset"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Run accepted",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreateRunResponse" },
+                "example": {
+                  "data": {
+                    "runId": "clxrun0000000001",
+                    "status": "running",
+                    "orchestratorRunId": "run_abc123"
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": {
+            "description": "Workflow not found for this user",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorBody" },
+                "example": { "error": "Workflow not found" }
+              }
+            }
+          },
+          "409": { "$ref": "#/components/responses/ConflictRunInProgress" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/api/v1/runs/{id}": {
+      "get": {
+        "tags": ["Runs"],
+        "operationId": "getRun",
+        "summary": "Get run status",
+        "description": "Returns the run record and `nodeRuns` (per-node status, inputs, output, errors, `creditCost`, `providerUsed`). Does not include `providerAttempts` or execution logs — those are available on dashboard session routes.",
+        "parameters": [{ "$ref": "#/components/parameters/RunId" }],
+        "responses": {
+          "200": {
+            "description": "Run details",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RunResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/api/v1/credits/balance": {
+      "get": {
+        "tags": ["Credits"],
+        "operationId": "getCreditBalance",
+        "summary": "Get credit balance",
+        "description": "Returns remaining balance in **microcredits** (1,000,000 microcredits = 1.00 display credit). New users receive an `initial_grant` of 100,000,000 microcredits (100 credits) on first access.",
+        "responses": {
+          "200": {
+            "description": "Balance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "balance": {
+                      "type": "integer",
+                      "description": "Microcredits",
+                      "example": 84070000
+                    }
+                  },
+                  "required": ["balance"]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API key from the dashboard **API & Outbound Webhooks** tab. Prefix: `gx_` (Unkey) or `gx_mock_` (local dev). Header: `Authorization: Bearer <key>`."
+      }
+    },
+    "parameters": {
+      "WorkflowId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string" },
+        "description": "Workflow CUID"
+      },
+      "RunId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string" },
+        "description": "Workflow run CUID"
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Validation failed",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ValidationErrorBody" },
+            "example": {
+              "error": "Invalid input",
+              "issues": [
+                {
+                  "code": "too_small",
+                  "minimum": 1,
+                  "type": "string",
+                  "path": ["name"],
+                  "message": "String must contain at least 1 character(s)"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing or invalid Bearer token",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorBody" },
+            "examples": {
+              "invalidKey": { "value": { "error": "Invalid or unauthorized API key" } },
+              "missingHeader": { "value": { "error": "Missing Authorization header" } }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Resource not found for this user",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorBody" },
+            "example": { "error": "Workflow not found" }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Unkey rate limit exceeded",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorBody" },
+            "example": { "error": "Rate limit exceeded" }
+          }
+        }
+      },
+      "ConflictRunInProgress": {
+        "description": "Another run is already `running` for this workflow",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": { "type": "string" },
+                "runId": { "type": "string" }
+              },
+              "required": ["error", "runId"]
+            },
+            "example": {
+              "error": "A run is already in progress for this workflow",
+              "runId": "clxrun0000000001"
+            }
+          }
+        }
+      },
+      "ServerError": {
+        "description": "Unexpected server error",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorBody" },
+            "example": { "error": "Internal server error" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ErrorBody": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" }
+        },
+        "required": ["error"]
+      },
+      "ValidationErrorBody": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ErrorBody" },
+          {
+            "type": "object",
+            "properties": {
+              "issues": {
+                "type": "array",
+                "items": { "type": "object" }
+              }
+            }
+          }
+        ]
+      },
+      "CreateWorkflowRequest": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "description": { "type": "string", "maxLength": 5000 }
+        }
+      },
+      "UpdateWorkflowRequest": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "description": { "type": "string", "nullable": true, "maxLength": 5000 },
+          "nodes": {
+            "type": "array",
+            "description": "React Flow node array. If present, must be non-empty and include `requestInputs` and `response` types.",
+            "items": { "type": "object" }
+          },
+          "edges": {
+            "type": "array",
+            "items": { "type": "object" }
+          },
+          "status": {
+            "type": "string",
+            "enum": ["idle", "running", "done", "error"]
+          }
+        }
+      },
+      "CreateRunRequest": {
+        "type": "object",
+        "required": ["workflowId"],
+        "properties": {
+          "workflowId": { "type": "string" },
+          "scope": {
+            "type": "string",
+            "enum": ["full", "partial", "single"],
+            "default": "full"
+          },
+          "inputValues": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Keyed by Request-Inputs field `id` (e.g. `field_text_default`). Overlays values at run start."
+          },
+          "nodeIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Required for `partial` / `single` — target node IDs on the canvas."
+          },
+          "existingOutputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Map of nodeId → prior output objects for partial reruns."
+          }
+        }
+      },
+      "WorkflowMetadata": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "status": {
+            "type": "string",
+            "enum": ["idle", "running", "done", "error"]
+          },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "_count": {
+            "type": "object",
+            "properties": {
+              "runs": { "type": "integer" }
+            }
+          }
+        }
+      },
+      "Workflow": {
+        "allOf": [
+          { "$ref": "#/components/schemas/WorkflowMetadata" },
+          {
+            "type": "object",
+            "properties": {
+              "userId": { "type": "string" },
+              "nodes": { "type": "array", "items": { "type": "object" } },
+              "edges": { "type": "array", "items": { "type": "object" } },
+              "webhookUrl": { "type": "string", "nullable": true },
+              "webhookSecret": {
+                "type": "string",
+                "nullable": true,
+                "description": "Only returned on dashboard webhook save — not on public v1 list/get."
+              }
+            }
+          }
+        ]
+      },
+      "WorkflowListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/WorkflowMetadata" }
+          }
+        }
+      },
+      "WorkflowResponse": {
+        "type": "object",
+        "properties": {
+          "data": { "$ref": "#/components/schemas/Workflow" }
+        }
+      },
+      "CreateRunResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "runId": { "type": "string" },
+              "status": { "type": "string", "example": "running" },
+              "orchestratorRunId": { "type": "string" }
+            },
+            "required": ["runId", "status", "orchestratorRunId"]
+          }
+        }
+      },
+      "NodeRun": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "nodeId": { "type": "string" },
+          "nodeName": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["success", "failed", "running", "skipped"]
+          },
+          "startedAt": { "type": "string", "format": "date-time" },
+          "finishedAt": { "type": "string", "format": "date-time", "nullable": true },
+          "durationMs": { "type": "integer", "nullable": true },
+          "inputs": { "type": "object", "nullable": true },
+          "output": { "type": "object", "nullable": true },
+          "error": { "type": "string", "nullable": true },
+          "providerUsed": { "type": "string", "nullable": true },
+          "creditCost": { "type": "integer", "nullable": true }
+        }
+      },
+      "WorkflowRun": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "workflowId": { "type": "string" },
+          "userId": { "type": "string" },
+          "scope": { "type": "string", "enum": ["full", "partial", "single"] },
+          "status": {
+            "type": "string",
+            "enum": ["success", "failed", "running", "partial"]
+          },
+          "startedAt": { "type": "string", "format": "date-time" },
+          "finishedAt": { "type": "string", "format": "date-time", "nullable": true },
+          "durationMs": { "type": "integer", "nullable": true },
+          "orchestratorRunId": { "type": "string", "nullable": true },
+          "inputValues": { "type": "object", "nullable": true },
+          "nodeRuns": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/NodeRun" }
+          }
+        }
+      },
+      "RunResponse": {
+        "type": "object",
+        "properties": {
+          "data": { "$ref": "#/components/schemas/WorkflowRun" }
+        }
+      }
+    }
+  }
+}

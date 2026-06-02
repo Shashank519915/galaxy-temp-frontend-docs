@@ -1,0 +1,56 @@
+---
+title: Credits
+description: Microcredits, holds, estimates, and balance API.
+---
+
+## Units
+
+All balances and ledger amounts are **microcredits**:
+
+| Microcredits | Display |
+| --- | --- |
+| 1,000,000 | 1.00 credit |
+| 210,000 | 0.21 credits |
+
+`GET /api/v1/credits/balance` returns `{ "balance": <integer> }` only—no currency symbol.
+
+## Initial grant
+
+On first balance access (`getOrCreateBalance` in `lib/credits.ts`), new users receive:
+
+- **100,000,000** microcredits (100.00 credits)
+- Ledger entry type `initial_grant`
+
+## Run lifecycle
+
+1. **Estimate** — `estimateWorkflowCost(nodes)` sums `definition.credits.base` for each node type in the execution set (see [Node types](/node-types)).
+2. **Hold** — On `POST /api/v1/runs`, the estimated amount is deducted immediately (`creditLedger` type `hold`).
+3. **Reconcile** — When the orchestrator finishes, actual per-node costs are applied and unused hold is released (dashboard route `POST /api/workflows/{id}/runs/{runId}/reconcile`—session auth).
+
+Insufficient balance at hold time returns **500** with message:
+
+```text
+Insufficient credits. Estimated cost: X.XXM, but your balance is Y.YYM.
+```
+
+## Estimated base costs (shared definitions)
+
+These values come from `@galaxy/shared` and `lib/credits.ts` `DEFINITIONS`:
+
+| Node `type` | Base microcredits | Notes |
+| --- | --- | --- |
+| `gptImage2` | 210,000 | |
+| `cropImage` | 210,000 | |
+| `klingV3` | 1,500,000 | |
+| `gemini` | 450,000 | Uses `openrouterLlmDefinition` in estimator map |
+| `mergeVideo` | 300,000 | |
+| `mergeAV` | 200,000 | |
+| `extractAudio` | 150,000 | |
+| `openRouter` | 0 | Not in `DEFINITIONS` map—hold may under-estimate |
+| `requestInputs`, `response` | 0 | |
+
+Actual `nodeRuns.creditCost` may differ after provider billing reconciliation.
+
+## MCP
+
+The `get_balance` MCP tool calls the same `getOrCreateBalance` helper as the REST route.

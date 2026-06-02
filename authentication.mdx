@@ -1,0 +1,71 @@
+---
+title: Authentication
+description: Bearer API keys for /api/v1 and how they are verified.
+---
+
+All `/api/v1/*` routes call `verifyApiRequest` in `galaxy-temp-backend/lib/api-auth.ts`.
+
+## Request format
+
+```http
+GET /api/v1/workflows HTTP/1.1
+Host: localhost:3000
+Authorization: Bearer gx_your_key_here
+```
+
+Only the `Authorization` header is accepted—no query-string keys.
+
+## Obtaining a key
+
+API keys are created in the **dashboard** (Clerk session), not via public v1:
+
+1. Run `galaxy-temp-frontend` and sign in.
+2. Open **API & Outbound Webhooks**.
+3. Create a key and copy the raw value immediately.
+
+See [Dashboard API](/dashboard-api#api-keys-clerk) for `POST /api/keys` details.
+
+<Note>
+Mintlify docs do not host your dashboard. Use your deployed frontend URL or `http://localhost:3000` locally.
+</Note>
+
+## Key types
+
+| Prefix | Mode | Verification |
+| --- | --- | --- |
+| `gx_…` | Unkey (production) | `keys.verifyKey` → `identity.externalId` = Clerk `userId` |
+| `gx_mock_…` | Local dev | SHA-256 hash stored in `apiKey` table |
+
+If `UNKEY_ROOT_KEY` and `UNKEY_API_ID` are unset, only local/mock verification runs.
+
+## Rate limiting
+
+When Unkey returns rate limit metadata, responses include:
+
+| Header | Description |
+| --- | --- |
+| `X-RateLimit-Limit` | Max requests in the window |
+| `X-RateLimit-Remaining` | Remaining requests |
+| `X-RateLimit-Reset` | Unix timestamp (seconds) when the window resets |
+
+Exceeded limits → **429** `{ "error": "Rate limit exceeded" }`.
+
+Local/mock mode simulates **60 requests/minute** with static headers.
+
+## Mintlify API playground
+
+On the **API Reference** tab, click **Authorize** and paste:
+
+```text
+Bearer gx_your_key_here
+```
+
+Or enter only the key if the UI adds the `Bearer` prefix automatically.
+
+Set `{baseUrl}` to your running backend (default `http://localhost:3000`).
+
+## Security practices
+
+- Rotate keys if exposed in chat, logs, or CI output.
+- Use separate keys per environment.
+- Do not commit `.env.local` or `mcp.json` with real keys.

@@ -1,0 +1,124 @@
+---
+title: Quickstart
+description: Create a key, call the public API, start a run, and poll results.
+---
+
+This guide matches the real handlers in `galaxy-temp-backend/app/api/v1/**`.
+
+## Prerequisites
+
+1. **PostgreSQL** and `.env.local` on `galaxy-temp-backend` (`DATABASE_URL`, Clerk, Trigger.dev, optional Unkey).
+2. Backend running:
+
+```bash
+cd galaxy-temp-backend
+pnpm install
+pnpm dev
+```
+
+3. An API key from the dashboard **API & Outbound Webhooks** tab (Clerk session required—see [Dashboard API](/dashboard-api)).
+
+<Warning>
+API keys are shown **once** at creation. Store them in a password manager or `.env.local`—never commit keys to git.
+</Warning>
+
+## 1. Check your balance
+
+```bash
+curl -s "http://localhost:3000/api/v1/credits/balance" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+Expected shape:
+
+```json
+{ "balance": 100000000 }
+```
+
+`balance` is in **microcredits** (1,000,000 = 1.00 credit). New users get `100000000` on first access (`initial_grant` in `lib/credits.ts`).
+
+You can run the same request from the **API Reference** tab playground—set the server `{baseUrl}` and paste your Bearer token.
+
+## 2. List or create a workflow
+
+**List:**
+
+```bash
+curl -s "http://localhost:3000/api/v1/workflows" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+**Create** (seeds Request-Inputs + Response nodes):
+
+```bash
+curl -s -X POST "http://localhost:3000/api/v1/workflows" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"API test pipeline","description":"Created from quickstart"}'
+```
+
+Save `data.id` as `WORKFLOW_ID`.
+
+## 3. Update the graph (optional)
+
+Use `PUT /api/v1/workflows/{id}` with `nodes` and `edges` exported from the canvas, or build the graph in the UI first.
+
+Validation rules (`lib/validation.ts`):
+
+- `name` length 1–120; `description` max 5000.
+- If `nodes` is present: non-empty array, must include types `requestInputs` and `response`.
+
+## 4. Start a run
+
+```bash
+curl -s -X POST "http://localhost:3000/api/v1/runs" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflowId": "WORKFLOW_ID",
+    "scope": "full",
+    "inputValues": {
+      "field_text_default": "A retro synthwave car at sunset"
+    }
+  }'
+```
+
+Success is **HTTP 202**:
+
+```json
+{
+  "data": {
+    "runId": "…",
+    "status": "running",
+    "orchestratorRunId": "…"
+  }
+}
+```
+
+The handler (`app/api/v1/runs/route.ts`):
+
+- Rejects unknown workflows (`404`).
+- Rejects concurrent runs (`409` + `runId`).
+- Places a credit **hold** from `estimateWorkflowCost`.
+- Triggers Trigger.dev task `workflow-orchestrator`.
+- Fires `run.started` webhook when configured.
+
+## 5. Poll run status
+
+```bash
+curl -s "http://localhost:3000/api/v1/runs/RUN_ID" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+Poll until `data.status` is `success`, `failed`, or `partial`. Inspect `data.nodeRuns[]` for per-node `output`, `error`, and `creditCost`.
+
+## 6. Configure a webhook (dashboard)
+
+Public v1 cannot set `webhookUrl`. Use the Clerk-protected route documented in [Dashboard API](/dashboard-api#configure-outbound-webhook).
+
+## Next steps
+
+- [Authentication](/authentication) — Unkey vs `gx_mock_` local mode
+- [Execution scopes](/execution-scopes) — `full`, `partial`, `single`
+- [Credits](/credits) — holds and reconciliation
+- Open the **API Reference** tab in this docs site — interactive playground for every endpoint

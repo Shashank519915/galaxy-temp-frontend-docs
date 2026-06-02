@@ -1,0 +1,43 @@
+---
+title: Introduction
+description: Programmatic access to the Galaxy visual workflow platform (work-trial codebase).
+---
+
+Galaxy is a **visual DAG workflow builder** for chaining AI and media nodes—GPT Image 2, Kling v3, Gemini / OpenRouter LLMs, crop/merge/extract utilities—and executing them asynchronously via **Trigger.dev**.
+
+This documentation describes the **work-trial implementation** in `galaxy-temp-backend` and `galaxy-temp-frontend`, not the production [galaxy.ai](https://galaxy.ai) product unless you deploy there yourself.
+
+## What you can do
+
+<CardGroup cols={2}>
+  <Card title="Public REST API" icon="code" href="/quickstart">
+    Versioned `/api/v1/*` routes with Bearer API keys, rate-limit headers, and an interactive playground on the **API Reference** tab (OpenAPI).
+  </Card>
+  <Card title="DAG execution" icon="circle-play" href="/architecture">
+    Coordinator + waitpoint orchestration on Trigger.dev—same path for dashboard, API, and MCP runs.
+  </Card>
+  <Card title="Outbound webhooks" icon="webhook" href="/webhooks">
+    Svix-style signed POSTs on `run.started`, `node.completed`, `run.completed`, and `run.failed`.
+  </Card>
+  <Card title="MCP (StdIO)" icon="desktop" href="/mcp-server">
+    Cursor / Claude Desktop tools: list workflows, start runs, poll status, read balance.
+  </Card>
+</CardGroup>
+
+## Repositories and URLs
+
+| Surface | Repository | Typical local URL |
+| --- | --- | --- |
+| Canvas UI | `galaxy-temp-frontend` | `http://localhost:3000` (`NEXT_PUBLIC_APP_URL`) |
+| HTTP API (v1 + dashboard routes) | `galaxy-temp-backend` | `http://localhost:3000` (same port if you run backend alone) |
+
+<Note>
+The frontend proxies some calls via `BACKEND_URL`. When developing both apps, run the **backend** on the host/port your frontend `.env` points to, or call the API directly from the Mintlify playground using the backend base URL.
+</Note>
+
+## Recommended path
+
+1. Sign in on the local canvas and open **API & Outbound Webhooks** to create a key (`gx_…` or `gx_mock_…`).
+2. Read [Quickstart](/quickstart) and try `GET /api/v1/credits/balance` in the [API Reference](/api-reference) playground.
+3. Configure [webhooks](/webhooks) on a workflow (dashboard-only route—see [Dashboard API](/dashboard-api)).
+4. Optional: wire [MCP](/mcp-server) in Cursor.

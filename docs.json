@@ -1,0 +1,73 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "Galaxy Developer Documentation",
+  "theme": "mint",
+  "colors": {
+    "primary": "#4F46E5",
+    "light": "#818CF8",
+    "dark": "#312E81"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Work trial backend",
+        "href": "https://github.com/bluerocketdev/worktrial-shashank-backend"
+      }
+    ]
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": ["introduction", "quickstart", "authentication"]
+          },
+          {
+            "group": "Concepts",
+            "pages": [
+              "architecture",
+              "execution-scopes",
+              "credits",
+              "node-types"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": ["webhooks", "mcp-server", "dashboard-api"]
+          },
+          {
+            "group": "Reference",
+            "pages": ["errors"]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "openapi": "openapi.json"
+      }
+    ]
+  },
+  "api": {
+    "openapi": "openapi.json",
+    "playground": {
+      "display": "interactive",
+      "proxy": true
+    },
+    "mdx": {
+      "auth": {
+        "method": "bearer",
+        "name": "Authorization"
+      }
+    },
+    "examples": {
+      "languages": ["curl", "python", "javascript", "typescript"],
+      "defaults": "required",
+      "prefill": true
+    }
+  },
+  "footerSocials": {
+    "github": "https://github.com/bluerocketdev/worktrial-shashank-backend"
+  }
+}

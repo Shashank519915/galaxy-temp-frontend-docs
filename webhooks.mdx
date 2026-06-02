@@ -1,0 +1,223 @@
+---
+title: Webhooks
+description: Outbound signed events for workflow runs (Svix-style headers).
+---
+
+Galaxy sends **outbound** HTTP POSTs to your `webhookUrl` when runs progress. Delivery is asynchronous via Trigger.dev task `emit-webhook` (`trigger/emitWebhookTask.ts`).
+
+## Configuration
+
+Webhooks are **per workflow**, stored as `webhookUrl` + `webhookSecret` on the workflow row.
+
+Configure through the dashboard (Clerk session only):
+
+**`POST /api/workflows/{id}/webhook`**
+
+```json
+{ "webhookUrl": "https://your-server.com/galaxy-hooks" }
+```
+
+See [Dashboard API](/dashboard-api#configure-outbound-webhook). Clearing the URL disables events.
+
+If either URL or secret is missing, `triggerOutboundWebhook` in `lib/webhooks.ts` is a no-op.
+
+## Event types
+
+| `type` | When | `success` |
+| --- | --- | --- |
+| `run.started` | Immediately after `POST /api/v1/runs` accepts (202) | `true` |
+| `node.completed` | After each node finishes (inline or task) | `true` if node succeeded |
+| `run.completed` | Orchestrator finished successfully | `true` |
+| `run.failed` | Orchestrator finished with failure | `false` |
+
+## HTTP delivery
+
+- **Method:** `POST`
+- **Content-Type:** `application/json`
+- **Body:** JSON envelope (see below)—serialized once for signing and sending
+- **Retries:** 3 attempts, exponential backoff 5s–60s
+
+### Headers
+
+| Header | Value |
+| --- | --- |
+| `svix-id` | `msg_<16 hex chars>` |
+| `svix-timestamp` | Unix seconds (string) |
+| `svix-signature` | `v1,<base64 HMAC-SHA256>` |
+
+### Signature algorithm
+
+Matches `emitWebhookTask`:
+
+```text
+signatureContent = `${msgId}.${timestamp}.${serializedBody}`
+HMAC-SHA256(webhookSecret, signatureContent) → base64
+Header: svix-signature: v1,${digest}
+```
+
+<Warning>
+Verify using the **raw request body bytes**, not `JSON.stringify(req.body)` after Express parsing—key order and whitespace must match what Galaxy sent. Use `express.raw` or middleware that preserves the raw buffer.
+</Warning>
+
+Reject timestamps older than **5 minutes** to limit replay attacks.
+
+## Payload envelope
+
+Every event uses the same top-level shape:
+
+```json
+{
+  "success": true,
+  "type": "run.started",
+  "runId": "clxrun…",
+  "workflowId": "clxwf…",
+  "data": { },
+  "error": null
+}
+```
+
+| Field | Description |
+| --- | --- |
+| `success` | Whether the event represents a successful step (node-level or run-level) |
+| `type` | Event name |
+| `runId` | `workflowRun.id` |
+| `workflowId` | Parent workflow |
+| `data` | Event-specific payload |
+| `error` | Error string when `success` is false; otherwise `null` |
+
+## Event payloads (from code)
+
+### `run.started`
+
+Emitted from `app/api/v1/runs/route.ts`:
+
+```json
+{
+  "success": true,
+  "type": "run.started",
+  "runId": "clxrun…",
+  "workflowId": "clxwf…",
+  "data": {
+    "scope": "full",
+    "inputValues": {
+      "field_text_default": "A retro synthwave skyline"
+    }
+  },
+  "error": null
+}
+```
+
+### `node.completed`
+
+From `workflowOrchestrator.ts` — task nodes include real `creditCost` / `providerUsed`; **inline** nodes use `creditCost: 0` and `providerUsed: "inline"`.
+
+Success:
+
+```json
+{
+  "success": true,
+  "type": "node.completed",
+  "runId": "clxrun…",
+  "workflowId": "clxwf…",
+  "data": {
+    "nodeId": "gpt-image-node-1",
+    "status": "success",
+    "durationMs": 10500,
+    "output": { "result": "https://cdn.example/result.png" },
+    "creditCost": 210000,
+    "providerUsed": "gpt-image-provider"
+  },
+  "error": null
+}
+```
+
+Failure:
+
+```json
+{
+  "success": false,
+  "type": "node.completed",
+  "runId": "clxrun…",
+  "workflowId": "clxwf…",
+  "data": {
+    "nodeId": "gpt-image-node-1",
+    "status": "failed",
+    "durationMs": 1200,
+    "output": null,
+    "creditCost": 0,
+    "providerUsed": "inline"
+  },
+  "error": "Provider timeout"
+}
+```
+
+### `run.completed`
+
+```json
+{
+  "success": true,
+  "type": "run.completed",
+  "runId": "clxrun…",
+  "workflowId": "clxwf…",
+  "data": {
+    "status": "success",
+    "durationMs": 42000,
+    "outputs": {
+      "request-inputs": { "field_text_default": "…" },
+      "gpt-image-node-1": { "result": "https://…" },
+      "response": { "result": "https://…" }
+    }
+  },
+  "error": null
+}
+```
+
+`outputs` is a map of **node ID → resolved output object**.
+
+### `run.failed`
+
+```json
+{
+  "success": false,
+  "type": "run.failed",
+  "runId": "clxrun…",
+  "workflowId": "clxwf…",
+  "data": {
+    "status": "failed",
+    "durationMs": 8000,
+    "outputs": {}
+  },
+  "error": "Execution failed"
+}
+```
+
+## Verification example (Node.js)
+
+```javascript
+const crypto = require("crypto");
+
+function verifyGalaxyWebhook(rawBody, headers, webhookSecret) {
+  const svixId = headers["svix-id"];
+  const svixTimestamp = headers["svix-timestamp"];
+  const svixSignature = headers["svix-signature"];
+
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - Number(svixTimestamp)) > 300) {
+    throw new Error("Timestamp too old");
+  }
+
+  const signatureContent = `${svixId}.${svixTimestamp}.${rawBody}`;
+  const expected = crypto
+    .createHmac("sha256", webhookSecret)
+    .update(signatureContent)
+    .digest("base64");
+
+  const received = svixSignature.replace(/^v1,/, "");
+  return crypto.timingSafeEqual(
+    Buffer.from(received, "base64"),
+    Buffer.from(expected, "base64")
+  );
+}
+```
+
+Use `whsec_…` from the dashboard when saving the webhook URL.

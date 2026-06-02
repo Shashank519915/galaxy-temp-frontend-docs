@@ -1,0 +1,9 @@
+{
+  "name": "galaxy-docs",
+  "private": true,
+  "scripts": {
+    "dev": "npx mintlify@latest dev",
+    "build": "npx mintlify@latest build",
+    "validate": "npx mintlify@latest validate"
+  }
+}

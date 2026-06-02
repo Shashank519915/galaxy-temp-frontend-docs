@@ -1,0 +1,80 @@
+---
+title: Node types
+description: Executable node types defined in @galaxy/shared (work-trial).
+---
+
+Node definitions live in `galaxy-temp-backend/shared/src/definitions/*.node.ts` (package `@galaxy/shared`). Each definition includes Zod input/output schemas, UI field metadata, and `credits.base`.
+
+Canvas-only nodes (no Trigger task of their own in the orchestrator sense):
+
+| `type` | Purpose |
+| --- | --- |
+| `requestInputs` | Playground / API input fields; values keyed by field `id` |
+| `response` | Declares which upstream outputs appear as workflow results |
+
+## AI / LLM nodes
+
+### `gptImage2` — GPT Image 2
+
+**Category:** image  
+**Base cost:** 210,000 microcredits  
+**Key inputs:** `prompt`, optional `uploadedImages[]`, `size`, `quality`, `n`, `background`, `output_format`  
+**Output:** `{ "result": "<url>" }`  
+**Task:** `gptImage2Task`
+
+### `klingV3` — Kling v3 video
+
+**Category:** video  
+**Base cost:** 1,500,000 microcredits  
+**Task:** `klingV3Task`
+
+### `gemini` — Gemini (multimodal)
+
+**Category:** text  
+**Base cost:** 450,000 microcredits  
+**Key inputs:** `prompt`, optional `systemPrompt`, `images[]`, `video`, `audio`, `file`, sampling params  
+**Output:** `{ "response": "<text>" }`  
+**Task:** `geminiTask`
+
+### `openRouter` — OpenRouter LLM
+
+**Category:** text  
+**Base cost:** 450,000 in definition; **not** included in `estimateWorkflowCost` map today  
+**Task:** `openrouterTask`
+
+## Media utility nodes
+
+| `type` | Name | Base µcredits | Task |
+| --- | --- | --- | --- |
+| `cropImage` | Crop Image | 210,000 | `cropImageTask` |
+| `mergeVideo` | Merge Video | 300,000 | `mergeVideoTask` |
+| `mergeAV` | Merge Audio/Video | 200,000 | `mergeAVTask` |
+| `extractAudio` | Extract Audio | 150,000 | `extractAudioTask` |
+
+FFmpeg-based tasks use durable timeouts and temp-file cleanup in `try/finally` blocks.
+
+## React Flow shape
+
+Nodes stored in Postgres match React Flow exports:
+
+```json
+{
+  "id": "node-1",
+  "type": "gptImage2",
+  "position": { "x": 400, "y": 200 },
+  "data": {
+    "label": "GPT Image 2",
+    "prompt": "…"
+  }
+}
+```
+
+Edges reference `source` / `target` node IDs and handle IDs for typed ports (`text`, `image`, `video`, etc.).
+
+## Adding nodes via API
+
+1. `POST /api/v1/workflows` — scaffold graph.
+2. `PUT /api/v1/workflows/{id}` — send full `nodes` + `edges` from canvas export, or build programmatically.
+3. Ensure graph validation: must include `requestInputs` and `response`.
+
+Design complex graphs in the UI first, then `GET /api/v1/workflows/{id}` to copy the JSON.
