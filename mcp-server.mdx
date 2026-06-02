@@ -1,114 +1,196 @@
 ---
 title: MCP Server
-description: StdIO Model Context Protocol tools for Cursor and Claude Desktop.
+description: Use Galaxy from Cursor or Claude Desktop via the Model Context Protocol over StdIO.
 ---
 
-The MCP server in `galaxy-temp-backend/scripts/mcp-server.ts` exposes workflow operations over **StdIO**. It uses the same PostgreSQL data and Trigger.dev `workflow-orchestrator` task as the web UI and public API.
+The Galaxy MCP server is a StdIO adapter that exposes workflow operations as tools for AI assistants. It connects to the same PostgreSQL database and Trigger.dev orchestrator as the REST API — there is no separate execution path.
+
+The server lives at `galaxy-temp-backend/scripts/mcp-server.ts`.
+
+---
+
+## What you can do
+
+Once connected, your AI assistant can manage workflows and runs directly from a conversation.
+
+<CardGroup cols={2}>
+  <Card title="Run workflows" icon="play">
+    Start a full-scope workflow run, check status, and read results without leaving the chat.
+  </Card>
+  <Card title="Manage workflows" icon="diagram-project">
+    List workflows, get their full graph JSON, and create new ones.
+  </Card>
+  <Card title="Check balance" icon="coins">
+    Read your microcredit balance before kicking off expensive graphs.
+  </Card>
+  <Card title="Same engine, no wrappers" icon="bolt">
+    MCP tools call the same Prisma queries and Trigger.dev task as the REST API — no indirection.
+  </Card>
+</CardGroup>
+
+---
 
 ## Prerequisites
 
-- `galaxy-temp-backend` dependencies installed (`pnpm install`)
-- `.env.local` with `DATABASE_URL`, Trigger.dev keys, and a valid API key
-- Optional Unkey env vars (`UNKEY_ROOT_KEY`, `UNKEY_API_ID`) for `gx_` keys
+- `galaxy-temp-backend` cloned and dependencies installed (`pnpm install`)
+- A `.env.local` with `DATABASE_URL` and Trigger.dev credentials
+- A valid API key (create one in the canvas dashboard under **API and Outbound Webhooks**)
 
-## Environment
+---
+
+## 1. Get an API key
+
+Follow the same steps as for the REST API — see [Authentication](/authentication#creating-a-key). Use either a `gx_` or `gx_mock_` key depending on your environment.
+
+---
+
+## 2. Set environment variables
 
 ```env
 GALAXY_API_KEY=gx_your_key_here
-DATABASE_URL=postgresql://…
-# Optional — same verification as REST:
-UNKEY_ROOT_KEY=…
-UNKEY_API_ID=…
+DATABASE_URL=postgresql://user:password@host:5432/dbname
+TRIGGER_SECRET_KEY=...
+TRIGGER_API_URL=...
 ```
 
-`GALAXY_API_KEY` is resolved to a Clerk `userId` via Unkey or local `apiKey` hash (same logic as `lib/api-auth.ts` / MCP `authenticateUser`).
+`GALAXY_API_KEY` is resolved to a Clerk user ID using the same verification logic as the REST API.
 
-## Run locally
+---
+
+## 3. Connect your client
+
+<Tabs>
+  <Tab title="Cursor">
+    Edit `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (per-project):
+
+    ```json
+    {
+      "mcpServers": {
+        "galaxy-workflows": {
+          "command": "pnpm",
+          "args": ["mcp:start"],
+          "cwd": "C:\\path\\to\\galaxy-temp-backend",
+          "env": {
+            "GALAXY_API_KEY": "gx_your_key_here"
+          }
+        }
+      }
+    }
+    ```
+
+    If `pnpm` is not on your system PATH, use `tsx` directly:
+
+    ```json
+    {
+      "mcpServers": {
+        "galaxy-workflows": {
+          "command": "npx",
+          "args": ["tsx", "scripts/mcp-server.ts"],
+          "cwd": "C:\\path\\to\\galaxy-temp-backend",
+          "env": {
+            "GALAXY_API_KEY": "gx_your_key_here"
+          }
+        }
+      }
+    }
+    ```
+
+    Restart Cursor after saving. The Galaxy tools appear in the MCP panel.
+  </Tab>
+  <Tab title="Claude Desktop">
+    Edit your Claude Desktop config:
+
+    - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+    - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+    ```json
+    {
+      "mcpServers": {
+        "galaxy-workflows": {
+          "command": "pnpm",
+          "args": ["mcp:start"],
+          "cwd": "/path/to/galaxy-temp-backend",
+          "env": {
+            "GALAXY_API_KEY": "gx_your_key_here"
+          }
+        }
+      }
+    }
+    ```
+
+    Restart Claude Desktop after saving.
+  </Tab>
+</Tabs>
+
+---
+
+## 4. Verify it works
+
+Run a smoke test from the terminal:
 
 ```bash
 cd galaxy-temp-backend
-pnpm mcp:start
+GALAXY_API_KEY=gx_your_key_here pnpm mcp:smoke
 ```
 
-Smoke test (optional):
+Or ask your AI assistant: *"List my Galaxy workflows."*
 
-```bash
-GALAXY_API_KEY=gx_… pnpm mcp:smoke
-```
+---
 
-## Cursor configuration
+## Available tools
 
-Add to `.cursor/mcp.json` (user or project):
-
-```json
-{
-  "mcpServers": {
-    "galaxy-workflows": {
-      "command": "pnpm",
-      "args": ["mcp:start"],
-      "cwd": "C:\\path\\to\\galaxy-temp-backend",
-      "env": {
-        "GALAXY_API_KEY": "gx_your_key_here"
-      }
-    }
-  }
-}
-```
-
-If `pnpm` is not on PATH:
-
-```json
-{
-  "command": "npx",
-  "args": ["tsx", "scripts/mcp-server.ts"],
-  "cwd": "C:\\path\\to\\galaxy-temp-backend",
-  "env": { "GALAXY_API_KEY": "gx_your_key_here" }
-}
-```
-
-## Tools
-
-| Tool | Description | Backend equivalent |
+| Tool | What it does | REST equivalent |
 | --- | --- | --- |
-| `list_workflows` | Metadata list for authenticated user | `GET /api/v1/workflows` |
-| `get_workflow` | Full `nodes` / `edges` JSON | `GET /api/v1/workflows/{id}` |
-| `create_workflow` | New canvas with Request-Inputs + Response | `POST /api/v1/workflows` |
-| `start_run` | Full-scope run + credit hold + orchestrator | `POST /api/v1/runs` (`scope: full`) |
-| `get_run_status` | Run + `nodeRuns` | `GET /api/v1/runs/{id}` |
+| `list_workflows` | Metadata for all workflows owned by the key's user | `GET /api/v1/workflows` |
+| `get_workflow` | Full `nodes` and `edges` JSON for one workflow | `GET /api/v1/workflows/{id}` |
+| `create_workflow` | New workflow with default scaffold | `POST /api/v1/workflows` |
+| `start_run` | Full-scope run with credit hold and orchestrator | `POST /api/v1/runs` (scope: full) |
+| `get_run_status` | Run record plus per-node results | `GET /api/v1/runs/{id}` |
 | `get_balance` | Microcredit balance | `GET /api/v1/credits/balance` |
 
-### `start_run` arguments
+### start_run
 
-Typical shape (see tool schema in server):
+| Argument | Required | Description |
+| --- | --- | --- |
+| `workflowId` | Yes | ID of the workflow to run |
+| `inputValues` | No | Object mapping Request-Inputs field IDs to values |
 
-- `workflowId` (required)
-- `inputValues` (optional object) — Request-Inputs field IDs → values
+The MCP server always starts **full-scope** runs. For partial or single-node reruns, use the REST API directly — see [Execution scopes](/execution-scopes).
 
-MCP currently starts **full** runs (same as default API). For partial reruns, use the REST API ([Execution scopes](/execution-scopes)).
+### create_workflow
 
-### `create_workflow` defaults
+Creates the same default scaffold as `POST /api/v1/workflows`:
 
-Identical to v1 `POST /api/v1/workflows`:
-
-- Node `request-inputs` (`requestInputs`) with `field_text_default`
-- Node `response` with empty `results`
+- One `requestInputs` node with a `field_text_default` text field
+- One `response` node with empty results
 - No edges
 
-## Architecture note
+After creating via MCP, open the canvas to build the full graph visually.
 
-MCP does **not** change the coordinator-waitpoint execution model. It is a thin StdIO adapter over Prisma + `tasks.trigger("workflow-orchestrator", …)`.
+---
 
-## Claude Desktop
+## Typical conversation flow
 
-Use the same `command` / `args` / `env` block under `mcpServers` in Claude Desktop config ([MCP intro](https://modelcontextprotocol.io/docs/getting-started/intro)).
+```
+list_workflows()
+  → sees "Image pipeline" (id: clxwf...)
+
+start_run(workflowId: "clxwf...", inputValues: { field_text_default: "A red Ferrari" })
+  → returns runId: "clxrun..."
+
+get_run_status(runId: "clxrun...")
+  → polls until status: "success"
+  → returns nodeRuns with outputs
+```
+
+---
 
 ## Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
-| `GALAXY_API_KEY environment variable is not configured` | Set env in MCP config |
-| `Invalid GALAXY_API_KEY` | Create key in dashboard; use full `gx_` or `gx_mock_` token |
-| Run stays `running` | Check Trigger.dev dashboard; ensure worker is connected |
-| Zero balance errors | `GET /api/v1/credits/balance` or `get_balance` tool |
-
-Full setup notes also live in `galaxy-temp-backend/docs/MCP_SETUP.md` in the repository.
+| `GALAXY_API_KEY environment variable is not configured` | Add `GALAXY_API_KEY` to the `env` block in your MCP config |
+| `Invalid GALAXY_API_KEY` | Key may be wrong or revoked — create a new one in the dashboard |
+| Run stays `running` indefinitely | Check the Trigger.dev dashboard to see if the orchestrator task is stalled. Confirm the worker is connected |
+| Insufficient credits error | Call `get_balance` before running expensive graphs |
+| Tools not visible in Cursor | Restart Cursor after editing `mcp.json`. Verify the `cwd` path is correct and the backend dependencies are installed |

@@ -1,80 +1,168 @@
 ---
-title: Node types
-description: Executable node types defined in @galaxy/shared (work-trial).
+title: Node Types
+description: Every node type available in Galaxy — inputs, outputs, credit costs, and how to use them via API.
 ---
 
-Node definitions live in `galaxy-temp-backend/shared/src/definitions/*.node.ts` (package `@galaxy/shared`). Each definition includes Zod input/output schemas, UI field metadata, and `credits.base`.
+Node definitions live in `@galaxy/shared` (the `shared/` package inside `galaxy-temp-backend`). Each definition includes Zod schemas for inputs and outputs, UI field metadata, typed edge handle declarations, and a base credit cost.
 
-Canvas-only nodes (no Trigger task of their own in the orchestrator sense):
+---
 
-| `type` | Purpose |
+## Scaffold nodes
+
+Two nodes exist in every workflow by default. They are resolved **inline** by the orchestrator — no Trigger.dev task is spawned.
+
+<CardGroup cols={2}>
+  <Card title="requestInputs" icon="circle-arrow-right">
+    The entry point for every workflow. Fields declared here become the keys in `inputValues` when you call `POST /api/v1/runs`.
+
+    A default scaffold includes one text field: `field_text_default`. You can add more fields of different types through the canvas.
+
+    **Base cost: 0 microcredits**
+  </Card>
+  <Card title="response" icon="circle-arrow-left">
+    Declares which upstream node outputs appear as the workflow's final result. The `results` list on this node references source handles from connected nodes.
+
+    **Base cost: 0 microcredits**
+  </Card>
+</CardGroup>
+
+Field types for `requestInputs` and the value format each expects in `inputValues`:
+
+| Field type | Value format |
 | --- | --- |
-| `requestInputs` | Playground / API input fields; values keyed by field `id` |
-| `response` | Declares which upstream outputs appear as workflow results |
+| `text_field`, `text` | String |
+| `number_field` | Number |
+| `boolean_field` | Boolean |
+| `image_field` (multi) | Array of image URL strings |
+| `video_field` | Single URL string |
+| `audio_field` | Single URL string |
+| `file_field` | Single URL string |
 
-## AI / LLM nodes
+---
 
-### `gptImage2` — GPT Image 2
+## AI nodes
 
-**Category:** image  
-**Base cost:** 210,000 microcredits  
-**Key inputs:** `prompt`, optional `uploadedImages[]`, `size`, `quality`, `n`, `background`, `output_format`  
-**Output:** `{ "result": "<url>" }`  
-**Task:** `gptImage2Task`
+<CardGroup cols={2}>
+  <Card title="gptImage2" icon="image">
+    **GPT Image 2** — generates images from a text prompt using OpenAI's GPT Image 2 model.
 
-### `klingV3` — Kling v3 video
+    Base cost: **210,000 µcredits (0.21 credits)**
+    Output: `{ "result": "<image URL>" }`
+    Task: `gptImage2Task`
+  </Card>
+  <Card title="klingV3" icon="video">
+    **Kling v3** — generates video from a text prompt using the Kling v3 model.
 
-**Category:** video  
-**Base cost:** 1,500,000 microcredits  
-**Task:** `klingV3Task`
+    Base cost: **1,500,000 µcredits (1.50 credits)**
+    Task: `klingV3Task`
+  </Card>
+  <Card title="gemini" icon="sparkles">
+    **Gemini** — multimodal LLM supporting text, image, video, audio, and file inputs.
 
-### `gemini` — Gemini (multimodal)
+    Base cost: **450,000 µcredits (0.45 credits)**
+    Output: `{ "response": "<text>" }`
+    Task: `geminiTask`
+  </Card>
+  <Card title="openRouter" icon="route">
+    **OpenRouter** — routes LLM requests through OpenRouter, providing access to many model providers with one API key.
 
-**Category:** text  
-**Base cost:** 450,000 microcredits  
-**Key inputs:** `prompt`, optional `systemPrompt`, `images[]`, `video`, `audio`, `file`, sampling params  
-**Output:** `{ "response": "<text>" }`  
-**Task:** `geminiTask`
+    Base cost: **450,000 µcredits** in definition (see note)
+    Task: `openrouterTask`
+  </Card>
+</CardGroup>
 
-### `openRouter` — OpenRouter LLM
+<Note>
+OpenRouter's base cost is defined in `@galaxy/shared` but is not currently included in the upfront cost estimate. The actual credit charge is reconciled from the provider response after the run completes.
+</Note>
 
-**Category:** text  
-**Base cost:** 450,000 in definition; **not** included in `estimateWorkflowCost` map today  
-**Task:** `openrouterTask`
+### GPT Image 2 inputs
 
-## Media utility nodes
+| Input | Type | Notes |
+| --- | --- | --- |
+| `prompt` | String | Required |
+| `uploadedImages` | Array of URLs | Optional — image editing or conditioning |
+| `size` | Enum | `1024x1024`, `1536x1024`, `1024x1536` |
+| `quality` | Enum | `standard`, `hd` |
+| `n` | Integer | Number of images to generate |
+| `background` | Enum | `opaque`, `transparent` |
+| `output_format` | Enum | `png`, `jpeg`, `webp` |
 
-| `type` | Name | Base µcredits | Task |
-| --- | --- | --- | --- |
-| `cropImage` | Crop Image | 210,000 | `cropImageTask` |
-| `mergeVideo` | Merge Video | 300,000 | `mergeVideoTask` |
-| `mergeAV` | Merge Audio/Video | 200,000 | `mergeAVTask` |
-| `extractAudio` | Extract Audio | 150,000 | `extractAudioTask` |
+### Gemini inputs
 
-FFmpeg-based tasks use durable timeouts and temp-file cleanup in `try/finally` blocks.
+| Input | Type | Notes |
+| --- | --- | --- |
+| `prompt` | String | Required |
+| `systemPrompt` | String | Optional system message |
+| `images` | Array of URLs | Optional image context |
+| `video` | URL | Optional video context |
+| `audio` | URL | Optional audio context |
+| `file` | URL | Optional document context |
 
-## React Flow shape
+---
 
-Nodes stored in Postgres match React Flow exports:
+## Media processing nodes
+
+These nodes run FFmpeg operations as Trigger.dev tasks with durable timeouts and automatic temp-file cleanup.
+
+<CardGroup cols={2}>
+  <Card title="cropImage" icon="crop">
+    **Crop Image** — crops an image to specified dimensions.
+
+    Base cost: **210,000 µcredits**
+    Task: `cropImageTask`
+  </Card>
+  <Card title="mergeVideo" icon="film">
+    **Merge Video** — concatenates multiple video clips into one.
+
+    Base cost: **300,000 µcredits**
+    Task: `mergeVideoTask`
+  </Card>
+  <Card title="mergeAV" icon="film">
+    **Merge Audio/Video** — combines an audio track with a video track.
+
+    Base cost: **200,000 µcredits**
+    Task: `mergeAVTask`
+  </Card>
+  <Card title="extractAudio" icon="music">
+    **Extract Audio** — extracts the audio stream from a video file.
+
+    Base cost: **150,000 µcredits**
+    Task: `extractAudioTask`
+  </Card>
+</CardGroup>
+
+---
+
+## Working with nodes via API
+
+The fastest workflow for building complex graphs:
+
+<Steps>
+  <Step title="Design visually">
+    Build the graph in the canvas at `https://galaxy-temp-frontend.vercel.app`. Use drag-and-drop to add nodes and connect typed handles.
+  </Step>
+  <Step title="Export the JSON">
+    Call `GET /api/v1/workflows/{id}` to retrieve the full `nodes` and `edges` arrays.
+  </Step>
+  <Step title="Use as template">
+    Use that JSON as a starting point when creating or updating workflows programmatically via `POST` and `PUT /api/v1/workflows`.
+  </Step>
+</Steps>
+
+Node objects stored in the database match the React Flow node shape:
 
 ```json
 {
-  "id": "node-1",
+  "id": "gpt-image-node-1",
   "type": "gptImage2",
   "position": { "x": 400, "y": 200 },
   "data": {
     "label": "GPT Image 2",
-    "prompt": "…"
+    "prompt": "A retro synthwave city at dusk"
   }
 }
 ```
 
-Edges reference `source` / `target` node IDs and handle IDs for typed ports (`text`, `image`, `video`, etc.).
+Edges reference `source` and `target` node IDs with typed handle IDs (e.g. `image`, `text`, `video`). The handle type on the source must be compatible with the handle type on the target.
 
-## Adding nodes via API
-
-1. `POST /api/v1/workflows` — scaffold graph.
-2. `PUT /api/v1/workflows/{id}` — send full `nodes` + `edges` from canvas export, or build programmatically.
-3. Ensure graph validation: must include `requestInputs` and `response`.
-
-Design complex graphs in the UI first, then `GET /api/v1/workflows/{id}` to copy the JSON.
+**Validation when updating via API:** the `nodes` array must be non-empty and must include at least one `requestInputs` node and one `response` node.

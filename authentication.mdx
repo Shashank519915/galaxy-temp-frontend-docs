@@ -1,71 +1,125 @@
 ---
 title: Authentication
-description: Bearer API keys for /api/v1 and how they are verified.
+description: How API keys work, the two verification modes, rate limit headers, and security practices.
 ---
 
-All `/api/v1/*` routes call `verifyApiRequest` in `galaxy-temp-backend/lib/api-auth.ts`.
+Every request to `/api/v1/*` must include a Bearer token in the `Authorization` header.
 
-## Request format
+<Tabs>
+  <Tab title="cURL">
+    ```bash
+    curl "https://galaxy-temp-frontend.vercel.app/api/v1/workflows" \
+      -H "Authorization: Bearer YOUR_API_KEY"
+    ```
+  </Tab>
+  <Tab title="JavaScript">
+    ```javascript
+    const res = await fetch(
+      "https://galaxy-temp-frontend.vercel.app/api/v1/workflows",
+      { headers: { Authorization: `Bearer ${process.env.GALAXY_API_KEY}` } }
+    );
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    import os, requests
 
-```http
-GET /api/v1/workflows HTTP/1.1
-Host: localhost:3000
-Authorization: Bearer gx_your_key_here
-```
+    res = requests.get(
+        "https://galaxy-temp-frontend.vercel.app/api/v1/workflows",
+        headers={"Authorization": f"Bearer {os.environ['GALAXY_API_KEY']}"},
+    )
+    ```
+  </Tab>
+</Tabs>
 
-Only the `Authorization` header is accepted—no query-string keys.
+There are no query-string keys, session cookies, or other auth methods on the public API.
 
-## Obtaining a key
+---
 
-API keys are created in the **dashboard** (Clerk session), not via public v1:
+## Creating a key
 
-1. Run `galaxy-temp-frontend` and sign in.
-2. Open **API & Outbound Webhooks**.
-3. Create a key and copy the raw value immediately.
+<Steps>
+  <Step title="Sign in">
+    Open `https://galaxy-temp-frontend.vercel.app` and sign in with your account.
+  </Step>
+  <Step title="Open API and Outbound Webhooks">
+    Click **API and Outbound Webhooks** in the left sidebar.
+  </Step>
+  <Step title="Create the key">
+    Click **Create key**, give it a descriptive name (e.g. "Production"), and confirm.
+  </Step>
+  <Step title="Copy immediately">
+    Copy the full `gx_...` token from the dialog. The raw token is shown **only once** — the server stores only its SHA-256 hash.
+  </Step>
+</Steps>
 
-See [Dashboard API](/dashboard-api#api-keys-clerk) for `POST /api/keys` details.
+<Warning>
+If you close the dialog without copying the key, you cannot retrieve it. Revoke it and create a new one.
+</Warning>
 
-<Note>
-Mintlify docs do not host your dashboard. Use your deployed frontend URL or `http://localhost:3000` locally.
-</Note>
+For the programmatic equivalent, see [Dashboard API](/dashboard-api#api-keys-clerk).
+
+---
 
 ## Key types
 
-| Prefix | Mode | Verification |
+| Prefix | What it means | Verification |
 | --- | --- | --- |
-| `gx_…` | Unkey (production) | `keys.verifyKey` → `identity.externalId` = Clerk `userId` |
-| `gx_mock_…` | Local dev | SHA-256 hash stored in `apiKey` table |
+| `gx_...` | Production key via Unkey | `keys.verifyKey` call returns `identity.externalId` (your Clerk user ID) |
+| `gx_mock_...` | Local / development key | SHA-256 hash matched against `apiKey` table in the database |
 
-If `UNKEY_ROOT_KEY` and `UNKEY_API_ID` are unset, only local/mock verification runs.
+When `UNKEY_ROOT_KEY` and `UNKEY_API_ID` are not set in the environment, the server falls back to local hash verification for all key prefixes. In production on Vercel both variables are configured, so `gx_` keys go through Unkey.
+
+---
+
+## Managing keys
+
+<CardGroup cols={2}>
+  <Card title="Create a key" icon="plus">
+    Open **API and Outbound Webhooks** in the dashboard. Keys are nameable and shown once at creation.
+  </Card>
+  <Card title="Revoke a key" icon="ban">
+    Delete the key from the dashboard. Revocation is immediate — requests using that key start returning `401`.
+  </Card>
+</CardGroup>
+
+<Note>
+Revoking one key does not affect other keys on your account.
+</Note>
+
+---
 
 ## Rate limiting
 
-When Unkey returns rate limit metadata, responses include:
+When requests are verified through Unkey, rate limit metadata is included in responses:
 
 | Header | Description |
 | --- | --- |
-| `X-RateLimit-Limit` | Max requests in the window |
-| `X-RateLimit-Remaining` | Remaining requests |
+| `X-RateLimit-Limit` | Maximum requests allowed in the current window |
+| `X-RateLimit-Remaining` | Requests remaining before the window resets |
 | `X-RateLimit-Reset` | Unix timestamp (seconds) when the window resets |
 
-Exceeded limits → **429** `{ "error": "Rate limit exceeded" }`.
+Exceeded limits return **429**:
 
-Local/mock mode simulates **60 requests/minute** with static headers.
-
-## Mintlify API playground
-
-On the **API Reference** tab, click **Authorize** and paste:
-
-```text
-Bearer gx_your_key_here
+```json
+{ "error": "Rate limit exceeded" }
 ```
 
-Or enter only the key if the UI adds the `Bearer` prefix automatically.
+In local development with `gx_mock_` keys, the server simulates 60 requests per minute with static header values.
 
-Set `{baseUrl}` to your running backend (default `http://localhost:3000`).
+---
+
+## API playground
+
+In the **API Reference** tab, click **Authorize** and enter your key. Depending on the UI, paste the full `Bearer gx_your_key_here` string, or just the key if the playground adds the prefix automatically.
+
+Set the server selector to **Production** (the Vercel URL). Choosing local development only works when you have the backend running locally.
+
+---
 
 ## Security practices
 
-- Rotate keys if exposed in chat, logs, or CI output.
-- Use separate keys per environment.
-- Do not commit `.env.local` or `mcp.json` with real keys.
+- Store keys in environment variables (`GALAXY_API_KEY`), never in committed code or screenshots.
+- Use separate keys per environment or integration.
+- Rotate a key immediately if it may have been exposed in logs, chat, or CI output.
+- Delete keys you no longer use.

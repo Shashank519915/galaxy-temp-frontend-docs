@@ -7,12 +7,16 @@
   },
   "servers": [
     {
+      "url": "https://galaxy-temp-frontend.vercel.app",
+      "description": "Production (Vercel)"
+    },
+    {
       "url": "{baseUrl}",
-      "description": "API base URL — point this at your running **galaxy-temp-backend** Next.js server.",
+      "description": "Local development",
       "variables": {
         "baseUrl": {
           "default": "http://localhost:3000",
-          "description": "Local backend (`pnpm dev` in galaxy-temp-backend). Change port if your `.env` uses another host."
+          "description": "Run `pnpm dev` in galaxy-temp-backend and set the port here."
         }
       }
     }

@@ -1,22 +1,26 @@
 ---
 title: Errors
-description: HTTP status codes and error bodies returned by the public API.
+description: HTTP status codes, error response shapes, and how to handle each error type from the public API.
 ---
 
-Public v1 handlers return JSON `{ "error": string }` unless noted. Validation failures add `issues` (Zod).
+All `/api/v1/*` routes return errors as JSON with at minimum an `error` string field. Validation failures include an additional `issues` array.
 
-## Status code reference
+---
 
-| Code | When | Example `error` |
-| --- | --- | --- |
-| **400** | Invalid JSON / Zod validation | `Invalid input` + `issues[]` |
-| **401** | Missing/invalid Bearer | `Missing Authorization header`, `Invalid or unauthorized API key`, `Invalid API key` |
-| **404** | Wrong user or missing resource | `Workflow not found`, `Run not found` |
-| **409** | Concurrent run | `A run is already in progress for this workflow` (+ `runId`) |
-| **429** | Unkey rate limit | `Rate limit exceeded` |
-| **500** | Server error or business rule | `Internal server error`, insufficient credits message |
+## Status codes
 
-## Validation (`400`)
+| Code | When it happens |
+| --- | --- |
+| **400** | Request body fails JSON parsing or Zod validation |
+| **401** | Missing or invalid Bearer token |
+| **404** | Resource not found, or found but belongs to another user |
+| **409** | A run is already active for the target workflow |
+| **429** | Unkey rate limit exceeded |
+| **500** | Unhandled server error or insufficient credits at run start |
+
+---
+
+## 400 — Validation error
 
 ```json
 {
@@ -31,54 +35,98 @@ Public v1 handlers return JSON `{ "error": string }` unless noted. Validation fa
 }
 ```
 
-Common Zod messages from `lib/validation.ts`:
+Common messages from `lib/validation.ts`:
 
-- `Refusing to persist an empty graph`
-- `Graph must include requestInputs and response nodes`
-- `name` length 1–120
+| Message | Cause |
+| --- | --- |
+| `"Refusing to persist an empty graph"` | `nodes` array was present but empty |
+| `"Graph must include requestInputs and response nodes"` | Valid array but missing required node types |
+| `"String must contain at least 1 character(s)"` | `name` field was empty |
+| `"String must contain at most 120 character(s)"` | `name` exceeded 120 characters |
 
-## Authentication (`401`)
+---
 
-`lib/api-auth.ts` behavior:
+## 401 — Authentication error
 
-1. Requires `Authorization: Bearer <token>`.
-2. If Unkey env vars set and key is not `gx_mock_*`, calls `https://api.unkey.com/v2/keys.verifyKey`.
-3. On Unkey failure or mock keys, falls back to `apiKey` table hash lookup.
-4. Unkey valid but missing `identity.externalId` → `API key is valid but has no identity/owner configured`.
+The `Authorization` header is required and must use the `Bearer` scheme:
 
-## Conflict (`409`)
+```http
+Authorization: Bearer gx_your_key_here
+```
+
+Specific messages and their causes:
+
+| Message | Cause |
+| --- | --- |
+| `"Missing Authorization header"` | No `Authorization` header in the request |
+| `"Invalid API key"` | Key not found in local hash table (mock mode) |
+| `"Invalid or unauthorized API key"` | Unkey rejected the key |
+| `"API key is valid but has no identity/owner configured"` | Key verified by Unkey but has no Clerk user ID |
+
+Verification order:
+1. Check that `Authorization: Bearer <token>` is present.
+2. If Unkey is configured and the key is not `gx_mock_*`, call Unkey's `keys.verifyKey`.
+3. Otherwise, look up the SHA-256 hash in the `apiKey` table.
+
+---
+
+## 404 — Not found
+
+```json
+{ "error": "Workflow not found" }
+```
+
+The server returns 404 when a resource does not exist **or** when it exists but belongs to a different user — the two cases are not distinguished to avoid leaking information.
+
+---
+
+## 409 — Concurrent run conflict
 
 ```json
 {
   "error": "A run is already in progress for this workflow",
-  "runId": "clxrun…"
+  "runId": "clxrun..."
 }
 ```
 
-Wait for that run to finish or cancel via dashboard (`POST /api/workflows/{id}/cancel`).
+Poll `GET /api/v1/runs/{runId}` until status is terminal (`success`, `failed`, or `partial`), then start your new run. Or cancel the active run from the dashboard.
 
-## Insufficient credits (`500`)
+---
 
-Not a separate HTTP code today—the runs handler throws inside the transaction:
+## 429 — Rate limited
 
-```text
+```json
+{ "error": "Rate limit exceeded" }
+```
+
+The `X-RateLimit-Reset` header tells you when the window resets. In local development with `gx_mock_` keys, the server simulates a 60 req/min limit — you will not see actual 429 errors in that mode.
+
+---
+
+## 500 — Server error / insufficient credits
+
+Most 500s are unexpected errors. One business rule also uses this status code: insufficient credits at run start.
+
+```
 Insufficient credits. Estimated cost: 2.10M, but your balance is 0.50M.
 ```
 
-Check balance with `GET /api/v1/credits/balance` before large graphs.
+Check `GET /api/v1/credits/balance` before starting runs on graphs with expensive nodes. For all other 500 errors, check the Vercel function logs or the Trigger.dev dashboard.
+
+---
 
 ## Rate limit headers
 
-On successful v1 responses (when Unkey returns limit metadata):
+Present on successful responses when Unkey returns limit metadata:
 
 | Header | Meaning |
 | --- | --- |
-| `X-RateLimit-Limit` | Max requests in window |
-| `X-RateLimit-Remaining` | Remaining requests |
-| `X-RateLimit-Reset` | Unix seconds when window resets |
+| `X-RateLimit-Limit` | Max requests in the current window |
+| `X-RateLimit-Remaining` | Requests remaining before reset |
+| `X-RateLimit-Reset` | Unix timestamp (seconds) when window resets |
 
-Mock/local mode returns a static budget (60/min) from `api-auth.ts`.
+---
 
 ## Webhook delivery failures
 
-Outbound webhooks run in Trigger.dev task `emit-webhook` with **3 retries** and exponential backoff (5s–60s). Failures are logged in Trigger.dev—not returned to the API caller.
+Webhook errors do not surface through the API. If a `node.completed` or `run.completed` event fails to reach your endpoint, the Trigger.dev task retries up to 3 times with exponential backoff. Check your Trigger.dev dashboard for delivery logs if events are missing.

@@ -1,91 +1,113 @@
 ---
-title: Dashboard API (session)
-description: Clerk-authenticated routes used by the canvas—not Bearer v1.
+title: Dashboard API
+description: Clerk-authenticated routes used internally by the canvas. Not accessible with Bearer API keys.
 ---
 
-These routes live on **galaxy-temp-backend** and require a **Clerk** session cookie from the frontend (`galaxy-temp-frontend`). They are **not** available with `/api/v1` Bearer keys.
+The Galaxy backend has two independent sets of routes:
 
-Use them when building UI features; use [API Reference](/api-reference) for integrations.
+<CardGroup cols={2}>
+  <Card title="Public API /api/v1/*" icon="code" href="/quickstart">
+    Bearer key auth. Documented in the API Reference tab. Use for integrations, scripts, and automation.
+  </Card>
+  <Card title="Dashboard routes /api/*" icon="browser">
+    Clerk session cookie auth. Documented here. Power the canvas UI — only useful if you are building a custom frontend against the same backend.
+  </Card>
+</CardGroup>
 
-## API keys (Clerk)
+<Warning>
+Dashboard routes do not accept Bearer API keys. They require a valid Clerk session obtained by signing into the frontend. For programmatic access, use `/api/v1/*`.
+</Warning>
 
-| Method | Path | Purpose |
+---
+
+## API key management
+
+| Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/api/keys` | List keys (masked) |
-| `POST` | `/api/keys` | Create key — raw token returned once |
-| `DELETE` | `/api/keys/{id}` | Revoke key |
+| `GET` | `/api/keys` | List keys for the signed-in user (values masked) |
+| `POST` | `/api/keys` | Create a new key — raw token returned once |
+| `DELETE` | `/api/keys/{id}` | Revoke a key by database ID |
 
-Keys are stored hashed (`SHA-256` of the raw token). Verification for v1 is in `lib/api-auth.ts`.
+Keys are stored as SHA-256 hashes. The full `gx_...` token is returned only in the `POST /api/keys` response body.
 
-## Workflows (session)
+---
 
-| Method | Path | Purpose |
+## Workflow management
+
+| Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/api/workflows` | List workflows (includes webhook fields) |
-| `POST` | `/api/workflows` | Create workflow |
-| `GET` | `/api/workflows/{id}` | Get graph |
-| `PATCH` | `/api/workflows/{id}` | Update graph (same Zod rules as v1 PUT) |
-| `DELETE` | `/api/workflows/{id}` | Delete |
-| `POST` | `/api/workflows/{id}/run` | Start run from dashboard |
-| `POST` | `/api/workflows/{id}/execute` | Execute path used by canvas |
-| `POST` | `/api/workflows/{id}/cancel` | Cancel in-flight run |
-| `GET` | `/api/workflows/{id}/history` | Run history |
-| `POST` | `/api/workflows/import` | Import JSON bundle |
-| `GET` | `/api/workflows/{id}/export` | Export JSON |
-| `GET` | `/api/workflows/sample` | Sample workflow |
+| `GET` | `/api/workflows` | List all workflows including webhook fields |
+| `POST` | `/api/workflows` | Create workflow with default scaffold |
+| `GET` | `/api/workflows/{id}` | Full graph (nodes, edges, webhook config) |
+| `PATCH` | `/api/workflows/{id}` | Update graph or metadata — same Zod rules as public `PUT` |
+| `DELETE` | `/api/workflows/{id}` | Delete workflow and run history |
+| `POST` | `/api/workflows/{id}/run` | Start a run from the dashboard |
+| `POST` | `/api/workflows/{id}/cancel` | Cancel an in-flight run |
+| `GET` | `/api/workflows/{id}/history` | Paginated run history with node-level results |
+| `POST` | `/api/workflows/import` | Import a workflow from a JSON bundle |
+| `GET` | `/api/workflows/{id}/export` | Export a workflow as a JSON bundle |
+| `GET` | `/api/workflows/sample` | Fetch a pre-built sample workflow |
 
-## Configure outbound webhook
+---
 
-<Note>
-There is **no** `POST /api/v1/workflows/{id}/webhook`. Webhooks are configured only via the session route below.
-</Note>
+## Webhook configuration
 
-**`POST /api/workflows/{id}/webhook`**
+There is no `/api/v1` route for webhook configuration — it is dashboard-only.
 
-Clerk auth required. Body:
+`POST /api/workflows/{id}/webhook`
 
 ```json
-{ "webhookUrl": "https://example.com/hooks/galaxy" }
+{ "webhookUrl": "https://your-server.com/galaxy-hooks" }
 ```
 
-- URL must start with `http://` or `https://`.
-- Empty string clears the webhook.
-- On first save, `webhookSecret` is generated as `whsec_<32 hex chars>` (or preserved if already set).
-- Response includes `webhookSecret` — copy it for signature verification.
+| Rule | Detail |
+| --- | --- |
+| URL format | Must start with `http://` or `https://` |
+| Clear webhook | Send empty string to disable delivery |
+| Secret on first save | `webhookSecret` generated as `whsec_<32 hex chars>` |
+| Secret on update | Existing secret is preserved if only the URL changes |
 
-Implementation: `app/api/workflows/[id]/webhook/route.ts`.
+The response includes both `webhookUrl` and `webhookSecret`. Store the secret securely — you need it to verify signatures. See [Webhooks](/webhooks) for the algorithm.
 
-## Credits (session)
+---
 
-| Method | Path | Purpose |
+## Credits
+
+| Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/api/credits/balance` | Balance for signed-in user (same microcredits as v1) |
+| `GET` | `/api/credits/balance` | Balance for signed-in user (same microcredit unit as `/api/v1/credits/balance`) |
 
-Public equivalent: `GET /api/v1/credits/balance` with Bearer token.
+---
 
-## Node runs & uploads
+## Internal execution routes
 
-| Method | Path | Purpose |
+Called by the canvas during and after run execution. Not intended for direct integration use.
+
+| Method | Path | Description |
 | --- | --- | --- |
-| `GET/POST` | `/api/workflows/{id}/node-runs` | Incremental node run updates from UI |
-| `POST` | `/api/workflows/{id}/node-runs/incremental` | Streaming updates |
-| `POST` | `/api/workflows/{id}/node-runs/token` | Waitpoint tokens |
-| `POST` | `/api/workflows/{id}/runs/{runId}/reconcile` | Credit reconciliation after run |
-| `POST` | `/api/upload` | Asset upload for canvas fields |
+| `GET` / `POST` | `/api/workflows/{id}/node-runs` | Incremental node run state updates |
+| `POST` | `/api/workflows/{id}/node-runs/incremental` | Streaming updates during live execution |
+| `POST` | `/api/workflows/{id}/node-runs/token` | Waitpoint token exchange for Trigger.dev |
+| `POST` | `/api/workflows/{id}/runs/{runId}/reconcile` | Credit reconciliation after run completes |
+| `POST` | `/api/upload` | File upload for canvas input fields |
 
-## Direct execute routes (testing)
+---
 
-Single-node provider proxies (session/auth as implemented per route):
+## Single-node test routes
+
+For testing individual AI providers without running a full DAG:
 
 - `POST /api/execute/openrouter`
 - `POST /api/execute/gemini`
 - `POST /api/execute/crop-image`
 
-Prefer full DAG runs via `/api/v1/runs` for production-like behavior.
+These are useful for debugging provider connectivity. Auth requirements vary by route.
+
+---
 
 ## Mapping to public v1
 
-| Dashboard | Public v1 |
+| Dashboard route | Public v1 equivalent |
 | --- | --- |
 | `POST /api/workflows` | `POST /api/v1/workflows` |
 | `PATCH /api/workflows/{id}` | `PUT /api/v1/workflows/{id}` |

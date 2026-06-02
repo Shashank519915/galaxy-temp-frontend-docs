@@ -1,20 +1,33 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "name": "Galaxy Developer Documentation",
-  "theme": "mint",
+  "name": "Galaxy Developer Docs",
+  "theme": "venus",
   "colors": {
     "primary": "#4F46E5",
     "light": "#818CF8",
     "dark": "#312E81"
   },
+  "favicon": "/favicon.svg",
   "navbar": {
     "links": [
       {
-        "label": "Work trial backend",
-        "href": "https://github.com/bluerocketdev/worktrial-shashank-backend"
+        "label": "Open Canvas",
+        "href": "https://galaxy-temp-frontend.vercel.app"
       }
     ]
   },
+  "anchors": [
+    {
+      "name": "API Reference",
+      "icon": "rectangle-terminal",
+      "url": "api-reference"
+    },
+    {
+      "name": "GitHub (backend)",
+      "icon": "github",
+      "url": "https://github.com/bluerocketdev/worktrial-shashank-backend"
+    }
+  ],
   "navigation": {
     "tabs": [
       {

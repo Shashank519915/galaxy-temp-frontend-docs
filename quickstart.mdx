@@ -1,124 +1,261 @@
 ---
 title: Quickstart
-description: Create a key, call the public API, start a run, and poll results.
+description: Get an API key, make your first call, start a workflow run, and poll results in under five minutes.
 ---
 
-This guide matches the real handlers in `galaxy-temp-backend/app/api/v1/**`.
+The Galaxy REST API is at `https://galaxy-temp-frontend.vercel.app/api/v1`. All examples use that base URL. Replace `YOUR_API_KEY` with a real key from the dashboard.
 
-## Prerequisites
+---
 
-1. **PostgreSQL** and `.env.local` on `galaxy-temp-backend` (`DATABASE_URL`, Clerk, Trigger.dev, optional Unkey).
-2. Backend running:
+## 1. Get an API key
 
-```bash
-cd galaxy-temp-backend
-pnpm install
-pnpm dev
-```
-
-3. An API key from the dashboard **API & Outbound Webhooks** tab (Clerk session required—see [Dashboard API](/dashboard-api)).
+<Steps>
+  <Step title="Sign in">
+    Open `https://galaxy-temp-frontend.vercel.app` and sign in.
+  </Step>
+  <Step title="Open API and Outbound Webhooks">
+    Click **API and Outbound Webhooks** in the left sidebar.
+  </Step>
+  <Step title="Create a key">
+    Click **Create key**, give it a label, and copy the full `gx_...` token immediately. It is only shown once.
+  </Step>
+</Steps>
 
 <Warning>
-API keys are shown **once** at creation. Store them in a password manager or `.env.local`—never commit keys to git.
+API keys cannot be retrieved after creation. If you lose one, revoke it and create a new key. Never commit keys to git or paste them in screenshots.
 </Warning>
 
-## 1. Check your balance
+---
 
-```bash
-curl -s "http://localhost:3000/api/v1/credits/balance" \
-  -H "Authorization: Bearer YOUR_API_KEY"
-```
+## 2. Check your balance
 
-Expected shape:
+A read-only call to verify the key works.
+
+<Tabs>
+  <Tab title="cURL">
+    ```bash
+    curl "https://galaxy-temp-frontend.vercel.app/api/v1/credits/balance" \
+      -H "Authorization: Bearer YOUR_API_KEY"
+    ```
+  </Tab>
+  <Tab title="JavaScript">
+    ```javascript
+    const res = await fetch(
+      "https://galaxy-temp-frontend.vercel.app/api/v1/credits/balance",
+      { headers: { Authorization: `Bearer ${process.env.GALAXY_API_KEY}` } }
+    );
+    const { balance } = await res.json();
+    console.log(balance); // e.g. 100000000
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    import os, requests
+
+    res = requests.get(
+        "https://galaxy-temp-frontend.vercel.app/api/v1/credits/balance",
+        headers={"Authorization": f"Bearer {os.environ['GALAXY_API_KEY']}"},
+    )
+    print(res.json()["balance"])  # e.g. 100000000
+    ```
+  </Tab>
+</Tabs>
 
 ```json
 { "balance": 100000000 }
 ```
 
-`balance` is in **microcredits** (1,000,000 = 1.00 credit). New users get `100000000` on first access (`initial_grant` in `lib/credits.ts`).
+`balance` is in **microcredits** — `100000000` is 100.00 credits, the default grant for new users. A `401` here means the key is missing, malformed, or revoked. See [Authentication](/authentication).
 
-You can run the same request from the **API Reference** tab playground—set the server `{baseUrl}` and paste your Bearer token.
+---
 
-## 2. List or create a workflow
+## 3. Create a workflow
 
-**List:**
+<Tabs>
+  <Tab title="cURL">
+    ```bash
+    curl -X POST "https://galaxy-temp-frontend.vercel.app/api/v1/workflows" \
+      -H "Authorization: Bearer YOUR_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{"name": "My first pipeline", "description": "Created via API"}'
+    ```
+  </Tab>
+  <Tab title="JavaScript">
+    ```javascript
+    const res = await fetch(
+      "https://galaxy-temp-frontend.vercel.app/api/v1/workflows",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.GALAXY_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: "My first pipeline" }),
+      }
+    );
+    const { data } = await res.json();
+    console.log(data.id); // save this as WORKFLOW_ID
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    res = requests.post(
+        "https://galaxy-temp-frontend.vercel.app/api/v1/workflows",
+        headers={
+            "Authorization": f"Bearer {os.environ['GALAXY_API_KEY']}",
+            "Content-Type": "application/json",
+        },
+        json={"name": "My first pipeline"},
+    )
+    workflow_id = res.json()["data"]["id"]
+    ```
+  </Tab>
+</Tabs>
+
+The response includes a `data.id` — save it as `WORKFLOW_ID`. The created workflow contains a `requestInputs` node (with one text field, `field_text_default`) and a `response` node, connected by no edges yet.
+
+---
+
+## 4. Design the graph (optional)
+
+The fastest way to build a real graph is visually. Open the canvas, drag in nodes, wire them up, then fetch the JSON:
 
 ```bash
-curl -s "http://localhost:3000/api/v1/workflows" \
+curl "https://galaxy-temp-frontend.vercel.app/api/v1/workflows/WORKFLOW_ID" \
   -H "Authorization: Bearer YOUR_API_KEY"
 ```
 
-**Create** (seeds Request-Inputs + Response nodes):
+Copy the `nodes` and `edges` arrays and `PUT` them onto any workflow:
 
 ```bash
-curl -s -X POST "http://localhost:3000/api/v1/workflows" \
+curl -X PUT "https://galaxy-temp-frontend.vercel.app/api/v1/workflows/WORKFLOW_ID" \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name":"API test pipeline","description":"Created from quickstart"}'
+  -d '{"name": "Updated name", "nodes": [...], "edges": [...]}'
 ```
 
-Save `data.id` as `WORKFLOW_ID`.
+Validation rules: `name` is 1–120 characters. If `nodes` is sent, it must be non-empty and include both a `requestInputs` and a `response` node. See [Node types](/node-types) for valid `type` values.
 
-## 3. Update the graph (optional)
+---
 
-Use `PUT /api/v1/workflows/{id}` with `nodes` and `edges` exported from the canvas, or build the graph in the UI first.
+## 5. Start a run
 
-Validation rules (`lib/validation.ts`):
+<Tabs>
+  <Tab title="cURL">
+    ```bash
+    curl -X POST "https://galaxy-temp-frontend.vercel.app/api/v1/runs" \
+      -H "Authorization: Bearer YOUR_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "workflowId": "WORKFLOW_ID",
+        "scope": "full",
+        "inputValues": {
+          "field_text_default": "A retro synthwave racing car at sunset"
+        }
+      }'
+    ```
+  </Tab>
+  <Tab title="JavaScript">
+    ```javascript
+    const run = await fetch(
+      "https://galaxy-temp-frontend.vercel.app/api/v1/runs",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.GALAXY_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          workflowId: WORKFLOW_ID,
+          scope: "full",
+          inputValues: { field_text_default: "A retro synthwave racing car at sunset" },
+        }),
+      }
+    ).then(r => r.json());
 
-- `name` length 1–120; `description` max 5000.
-- If `nodes` is present: non-empty array, must include types `requestInputs` and `response`.
+    console.log("runId:", run.data.runId);
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    run = requests.post(
+        "https://galaxy-temp-frontend.vercel.app/api/v1/runs",
+        headers={
+            "Authorization": f"Bearer {os.environ['GALAXY_API_KEY']}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "workflowId": workflow_id,
+            "scope": "full",
+            "inputValues": {"field_text_default": "A retro synthwave racing car at sunset"},
+        },
+    ).json()
 
-## 4. Start a run
+    run_id = run["data"]["runId"]
+    ```
+  </Tab>
+</Tabs>
 
-```bash
-curl -s -X POST "http://localhost:3000/api/v1/runs" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workflowId": "WORKFLOW_ID",
-    "scope": "full",
-    "inputValues": {
-      "field_text_default": "A retro synthwave car at sunset"
-    }
-  }'
-```
-
-Success is **HTTP 202**:
+A successful response is **HTTP 202**:
 
 ```json
 {
   "data": {
-    "runId": "…",
+    "runId": "clxrun...",
     "status": "running",
-    "orchestratorRunId": "…"
+    "orchestratorRunId": "run_abc123"
   }
 }
 ```
 
-The handler (`app/api/v1/runs/route.ts`):
+The API immediately places a credit hold, creates the run record, and hands the job to Trigger.dev. Your call returns right away — poll separately for results.
 
-- Rejects unknown workflows (`404`).
-- Rejects concurrent runs (`409` + `runId`).
-- Places a credit **hold** from `estimateWorkflowCost`.
-- Triggers Trigger.dev task `workflow-orchestrator`.
-- Fires `run.started` webhook when configured.
+Only one run can be active per workflow at a time. A concurrent second request returns **409** with the existing `runId`.
 
-## 5. Poll run status
+---
 
-```bash
-curl -s "http://localhost:3000/api/v1/runs/RUN_ID" \
-  -H "Authorization: Bearer YOUR_API_KEY"
-```
+## 6. Poll for results
 
-Poll until `data.status` is `success`, `failed`, or `partial`. Inspect `data.nodeRuns[]` for per-node `output`, `error`, and `creditCost`.
+<Tabs>
+  <Tab title="Poll for status">
+    Hit `GET /api/v1/runs/{runId}` until status becomes `success`, `failed`, or `partial`.
 
-## 6. Configure a webhook (dashboard)
+    ```bash
+    curl "https://galaxy-temp-frontend.vercel.app/api/v1/runs/RUN_ID" \
+      -H "Authorization: Bearer YOUR_API_KEY"
+    ```
 
-Public v1 cannot set `webhookUrl`. Use the Clerk-protected route documented in [Dashboard API](/dashboard-api#configure-outbound-webhook).
+    The `data.nodeRuns` array has one entry per graph node with `status`, `output`, `error`, `creditCost`, and `providerUsed`.
+  </Tab>
+  <Tab title="Subscribe via webhook">
+    Configure a `webhookUrl` on the workflow once (dashboard only) and receive push events instead:
+
+    | Event | When |
+    | --- | --- |
+    | `run.started` | After 202 accepted |
+    | `node.completed` | After each node |
+    | `run.completed` | All nodes finished |
+    | `run.failed` | Run ended with failures |
+
+    See [Webhooks](/webhooks) for signature verification and payload shapes.
+  </Tab>
+</Tabs>
+
+---
 
 ## Next steps
 
-- [Authentication](/authentication) — Unkey vs `gx_mock_` local mode
-- [Execution scopes](/execution-scopes) — `full`, `partial`, `single`
-- [Credits](/credits) — holds and reconciliation
-- Open the **API Reference** tab in this docs site — interactive playground for every endpoint
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/authentication">
+    Key types, rate limits, and how verification works.
+  </Card>
+  <Card title="Execution scopes" icon="sliders" href="/execution-scopes">
+    full, partial, and single run modes.
+  </Card>
+  <Card title="Credits" icon="coins" href="/credits">
+    Holds, reconciliation, and base costs per node type.
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/webhooks">
+    Push events for run and node lifecycle.
+  </Card>
+</CardGroup>

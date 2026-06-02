@@ -1,56 +1,94 @@
 ---
 title: Credits
-description: Microcredits, holds, estimates, and balance API.
+description: Microcredit units, the hold-and-reconcile lifecycle, base costs per node type, and the balance API.
+---
+
+Galaxy uses a microcredit ledger to track usage. Every run places a hold at start and reconciles actual costs when the run finishes.
+
 ---
 
 ## Units
 
-All balances and ledger amounts are **microcredits**:
+All balances and costs are expressed in **microcredits**:
 
-| Microcredits | Display |
+| Microcredits | Display value |
 | --- | --- |
 | 1,000,000 | 1.00 credit |
 | 210,000 | 0.21 credits |
+| 100,000,000 | 100.00 credits |
 
-`GET /api/v1/credits/balance` returns `{ "balance": <integer> }` only—no currency symbol.
+`GET /api/v1/credits/balance` returns `{ "balance": <integer> }` in microcredits.
+
+---
 
 ## Initial grant
 
-On first balance access (`getOrCreateBalance` in `lib/credits.ts`), new users receive:
+When a user's balance is accessed for the first time, the system automatically creates a ledger entry of type `initial_grant` worth **100,000,000 microcredits** (100.00 credits). This happens on the first API call or dashboard login.
 
-- **100,000,000** microcredits (100.00 credits)
-- Ledger entry type `initial_grant`
+---
 
 ## Run lifecycle
 
-1. **Estimate** — `estimateWorkflowCost(nodes)` sums `definition.credits.base` for each node type in the execution set (see [Node types](/node-types)).
-2. **Hold** — On `POST /api/v1/runs`, the estimated amount is deducted immediately (`creditLedger` type `hold`).
-3. **Reconcile** — When the orchestrator finishes, actual per-node costs are applied and unused hold is released (dashboard route `POST /api/workflows/{id}/runs/{runId}/reconcile`—session auth).
+<Steps>
+  <Step title="Estimate">
+    Before a run starts, `estimateWorkflowCost` sums the `credits.base` value from the shared node definition for each node in the execution set. This is an upfront estimate, not the final bill.
+  </Step>
+  <Step title="Hold">
+    When `POST /api/v1/runs` is accepted (HTTP 202), the estimated cost is immediately deducted from the balance as a ledger entry of type `hold`.
 
-Insufficient balance at hold time returns **500** with message:
+    If the balance is insufficient, the request returns **500**:
+    ```
+    Insufficient credits. Estimated cost: 2.10M, but your balance is 0.50M.
+    ```
+  </Step>
+  <Step title="Reconcile">
+    When the orchestrator finishes, actual per-node costs from `NodeRun.creditCost` are recorded. The difference between the hold and the actual total is returned to the balance. This happens automatically.
+  </Step>
+</Steps>
 
-```text
-Insufficient credits. Estimated cost: X.XXM, but your balance is Y.YYM.
-```
+<Tip>
+Check `GET /api/v1/credits/balance` before starting runs on large graphs to avoid the insufficient credits error.
+</Tip>
 
-## Estimated base costs (shared definitions)
+---
 
-These values come from `@galaxy/shared` and `lib/credits.ts` `DEFINITIONS`:
+## Base costs by node type
 
-| Node `type` | Base microcredits | Notes |
+| Node type | Base cost | Display |
 | --- | --- | --- |
-| `gptImage2` | 210,000 | |
-| `cropImage` | 210,000 | |
-| `klingV3` | 1,500,000 | |
-| `gemini` | 450,000 | Uses `openrouterLlmDefinition` in estimator map |
-| `mergeVideo` | 300,000 | |
-| `mergeAV` | 200,000 | |
-| `extractAudio` | 150,000 | |
-| `openRouter` | 0 | Not in `DEFINITIONS` map—hold may under-estimate |
-| `requestInputs`, `response` | 0 | |
+| `gptImage2` | 210,000 µcredits | 0.21 credits |
+| `cropImage` | 210,000 µcredits | 0.21 credits |
+| `gemini` | 450,000 µcredits | 0.45 credits |
+| `openRouter` | 450,000 µcredits | 0.45 credits (see note) |
+| `klingV3` | 1,500,000 µcredits | 1.50 credits |
+| `mergeVideo` | 300,000 µcredits | 0.30 credits |
+| `mergeAV` | 200,000 µcredits | 0.20 credits |
+| `extractAudio` | 150,000 µcredits | 0.15 credits |
+| `requestInputs` | 0 | Free |
+| `response` | 0 | Free |
 
-Actual `nodeRuns.creditCost` may differ after provider billing reconciliation.
+<Note>
+`openRouter` has a base cost in its node definition but is not currently included in the upfront `estimateWorkflowCost` map. Credit holds for workflows containing OpenRouter nodes may therefore be lower than the actual provider cost. Actual cost is reconciled from `NodeRun.creditCost` after the run.
+</Note>
 
-## MCP
+The actual `creditCost` on each `NodeRun` reflects what the provider charged for that specific call and may differ from the base estimate.
 
-The `get_balance` MCP tool calls the same `getOrCreateBalance` helper as the REST route.
+---
+
+## Checking balance
+
+<Tabs>
+  <Tab title="REST API">
+    ```bash
+    curl "https://galaxy-temp-frontend.vercel.app/api/v1/credits/balance" \
+      -H "Authorization: Bearer YOUR_API_KEY"
+    ```
+
+    ```json
+    { "balance": 84070000 }
+    ```
+  </Tab>
+  <Tab title="MCP">
+    Ask your AI assistant to call `get_balance` — it calls the same underlying function as the REST route.
+  </Tab>
+</Tabs>

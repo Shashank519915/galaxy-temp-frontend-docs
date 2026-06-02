@@ -1,43 +1,92 @@
 ---
 title: Introduction
-description: Programmatic access to the Galaxy visual workflow platform (work-trial codebase).
+description: Galaxy is a visual DAG workflow builder for chaining AI and media nodes, with a public REST API, outbound webhooks, and an MCP server for AI assistants.
 ---
 
-Galaxy is a **visual DAG workflow builder** for chaining AI and media nodes—GPT Image 2, Kling v3, Gemini / OpenRouter LLMs, crop/merge/extract utilities—and executing them asynchronously via **Trigger.dev**.
+Galaxy lets you build multi-step AI pipelines on a drag-and-drop canvas and run them via the dashboard, API, or an AI assistant like Cursor.
 
-This documentation describes the **work-trial implementation** in `galaxy-temp-backend` and `galaxy-temp-frontend`, not the production [galaxy.ai](https://galaxy.ai) product unless you deploy there yourself.
+A pipeline is a **directed acyclic graph (DAG)** of nodes connected by typed edges. Each node is a discrete operation: generate an image with GPT Image 2, produce a video with Kling v3, run a prompt through Gemini or OpenRouter, or process media with FFmpeg utilities (crop, merge, audio extraction). Nodes pass typed outputs — text, image URL, video URL, audio URL — downstream through typed handles. The orchestrator on Trigger.dev walks the graph in topological order, running heavy nodes as isolated tasks with automatic retries.
+
+---
 
 ## What you can do
 
 <CardGroup cols={2}>
-  <Card title="Public REST API" icon="code" href="/quickstart">
-    Versioned `/api/v1/*` routes with Bearer API keys, rate-limit headers, and an interactive playground on the **API Reference** tab (OpenAPI).
+  <Card title="REST API" icon="code" href="/quickstart">
+    Versioned `/api/v1/*` routes authenticated with `gx_` Bearer keys. Create workflows, start runs, poll node-level results, and read credit balance. The API Reference tab has an interactive playground.
   </Card>
-  <Card title="DAG execution" icon="circle-play" href="/architecture">
-    Coordinator + waitpoint orchestration on Trigger.dev—same path for dashboard, API, and MCP runs.
+  <Card title="DAG Execution" icon="circle-play" href="/architecture">
+    One Trigger.dev coordinator task handles every run regardless of whether it came from the dashboard, the API, or MCP. Nodes run in topological order with waitpoint-based concurrency.
   </Card>
-  <Card title="Outbound webhooks" icon="webhook" href="/webhooks">
-    Svix-style signed POSTs on `run.started`, `node.completed`, `run.completed`, and `run.failed`.
+  <Card title="Outbound Webhooks" icon="webhook" href="/webhooks">
+    Receive signed HTTP POSTs when runs start, each node completes, or a run finishes or fails. Signature format matches Svix verification libraries.
   </Card>
-  <Card title="MCP (StdIO)" icon="desktop" href="/mcp-server">
-    Cursor / Claude Desktop tools: list workflows, start runs, poll status, read balance.
+  <Card title="MCP Server" icon="plug" href="/mcp-server">
+    Wire Galaxy into Cursor or Claude Desktop over StdIO. List workflows, create them, start full runs, and poll status without leaving your editor.
   </Card>
 </CardGroup>
 
-## Repositories and URLs
+---
 
-| Surface | Repository | Typical local URL |
-| --- | --- | --- |
-| Canvas UI | `galaxy-temp-frontend` | `http://localhost:3000` (`NEXT_PUBLIC_APP_URL`) |
-| HTTP API (v1 + dashboard routes) | `galaxy-temp-backend` | `http://localhost:3000` (same port if you run backend alone) |
+## Why Galaxy
+
+<CardGroup cols={3}>
+  <Card title="One canvas, many models" icon="cubes">
+    Mix image generation, video, LLM, and media utility nodes in one pipeline. Swap providers without rewriting orchestration code.
+  </Card>
+  <Card title="Async by default" icon="clock">
+    Runs execute in the background on Trigger.dev. Get results by polling the REST API or by receiving webhook push events.
+  </Card>
+  <Card title="Built for agents" icon="robot">
+    First-class MCP support means AI assistants can list, create, and run workflows directly from a chat conversation.
+  </Card>
+</CardGroup>
+
+---
+
+## Live URLs
+
+| Surface | URL |
+| --- | --- |
+| Canvas and dashboard | `https://galaxy-temp-frontend.vercel.app` |
+| REST API base | `https://galaxy-temp-frontend.vercel.app/api/v1` |
+| These docs | `https://galaxy-temp-frontend.vercel.app/docs` |
 
 <Note>
-The frontend proxies some calls via `BACKEND_URL`. When developing both apps, run the **backend** on the host/port your frontend `.env` points to, or call the API directly from the Mintlify playground using the backend base URL.
+The frontend and backend run as a single Next.js deployment on Vercel. All `/api/*` routes are served from the same origin as the canvas.
 </Note>
+
+---
 
 ## Recommended path
 
-1. Sign in on the local canvas and open **API & Outbound Webhooks** to create a key (`gx_…` or `gx_mock_…`).
-2. Read [Quickstart](/quickstart) and try `GET /api/v1/credits/balance` in the [API Reference](/api-reference) playground.
-3. Configure [webhooks](/webhooks) on a workflow (dashboard-only route—see [Dashboard API](/dashboard-api)).
-4. Optional: wire [MCP](/mcp-server) in Cursor.
+<Steps>
+  <Step title="Get an API key">
+    Sign into the canvas, open **API and Outbound Webhooks** in the sidebar, and create a `gx_...` key. Copy it immediately — it is shown only once.
+  </Step>
+  <Step title="Make your first call">
+    Follow the [Quickstart](/quickstart) to call `GET /api/v1/credits/balance` and create your first workflow via API.
+  </Step>
+  <Step title="Design a graph">
+    Build a more complex pipeline in the canvas, then export the node/edge JSON and `PUT` it back via API.
+  </Step>
+  <Step title="Add a webhook">
+    Configure a webhook URL on the workflow to receive real-time progress events during runs instead of polling.
+  </Step>
+  <Step title="Connect MCP (optional)">
+    Set up the [MCP server](/mcp-server) to control workflows from Cursor or Claude Desktop.
+  </Step>
+</Steps>
+
+---
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="circle-play" href="/quickstart">
+    Make your first API call in under five minutes.
+  </Card>
+  <Card title="Concepts" icon="book" href="/architecture">
+    Workflows, runs, nodes, execution scopes — the vocabulary you will see throughout the API.
+  </Card>
+</CardGroup>

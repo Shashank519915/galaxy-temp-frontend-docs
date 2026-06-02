@@ -1,81 +1,102 @@
 ---
-title: Execution scopes
-description: full, partial, and single run modes for the public runs API.
+title: Execution Scopes
+description: How full, partial, and single scopes control which nodes run when you call POST /api/v1/runs.
 ---
 
-`POST /api/v1/runs` accepts a `scope` field (default `full`). The orchestrator (`trigger/workflowOrchestrator.ts`) uses it to decide which canvas nodes execute.
+Every `POST /api/v1/runs` request includes a `scope` field that tells the orchestrator which nodes to execute. The default is `full`.
 
-## `full`
+---
 
-Runs **all nodes** in the workflow graph (topological order).
+## Scope overview
+
+<CardGroup cols={3}>
+  <Card title="full" icon="play">
+    Runs every node in the workflow graph in topological order. Use this for a fresh end-to-end run.
+  </Card>
+  <Card title="partial" icon="sliders">
+    Runs a specific set of nodes plus their upstream dependencies. Useful for re-running one branch while reusing cached results from other branches.
+  </Card>
+  <Card title="single" icon="crosshairs">
+    Same behavior as `partial` in the current orchestrator — expands to upstream dependencies of the target nodes. Use when you have all upstream outputs cached in `existingOutputs`.
+  </Card>
+</CardGroup>
+
+---
+
+## full
 
 ```json
 {
-  "workflowId": "clxwf…",
+  "workflowId": "clxwf...",
   "scope": "full",
   "inputValues": {
-    "field_text_default": "Prompt text"
+    "field_text_default": "A retro synthwave racing car at sunset"
   }
 }
 ```
 
-Credit hold uses `estimateWorkflowCost` over **every** node in the workflow.
+The credit hold is calculated by summing the base cost of every node in the workflow. See [Credits](/credits) for per-node costs.
 
-## `partial` and `single`
+---
 
-Both require `nodeIds` — an array of canvas node IDs to target.
-
-| Scope | Behavior |
-| --- | --- |
-| `partial` | Executes the target nodes **and dependencies** (upstream nodes needed for inputs), respecting `existingOutputs` for nodes already satisfied. |
-| `single` | Same dependency expansion as `partial` in the current orchestrator—use when re-running one branch with cached upstream outputs. |
-
-Example partial rerun:
+## partial
 
 ```json
 {
-  "workflowId": "clxwf…",
+  "workflowId": "clxwf...",
   "scope": "partial",
   "nodeIds": ["gpt-image-node-1"],
   "inputValues": {},
   "existingOutputs": {
     "request-inputs": {
-      "field_text_default": "Cached prompt"
+      "field_text_default": "Cached prompt from previous run"
     }
   }
 }
 ```
 
-`existingOutputs` keys are **node IDs** (e.g. `request-inputs`), not field IDs.
+`nodeIds` is required. The orchestrator automatically includes upstream dependencies of those nodes.
 
-## Request-Inputs overlay
+`existingOutputs` is a map of **node ID to output object**. Supply the outputs of nodes you already have results for — the orchestrator uses them as inputs without re-executing those nodes.
 
-`inputValues` is merged at run start into the Request-Inputs node. Keys must match field `id` values in `node.data.fields` (default scaffold uses `field_text_default`).
+---
 
-Playground field typing in the frontend (`lib/request-inputs.ts`) maps:
+## Request-Inputs and inputValues
 
-| Field type prefix / type | Kind |
+`inputValues` is merged into the `requestInputs` node at run start. Keys must match the `id` of a field in `node.data.fields`. The default scaffold uses `field_text_default`.
+
+| Field type | Expected value |
 | --- | --- |
-| `text_field`, `text` | string |
-| `number_field` | number |
-| `boolean_field` | boolean |
-| `image_field` (multi) | string URL array |
-| `video_field`, `audio_field`, `file_field` | string URL |
+| `text_field`, `text` | String |
+| `number_field` | Number |
+| `boolean_field` | Boolean |
+| `image_field` (multi) | Array of image URL strings |
+| `video_field`, `audio_field`, `file_field` | Single URL string |
+
+---
 
 ## Concurrency guard
 
-Only **one** `running` workflow run per workflow is allowed. A second `POST /api/v1/runs` returns:
+Only one run can be active per workflow at a time. A concurrent second request returns **409**:
 
 ```json
 {
   "error": "A run is already in progress for this workflow",
-  "runId": "clxrun…"
+  "runId": "clxrun..."
 }
 ```
 
-HTTP **409**.
+Poll `GET /api/v1/runs/{runId}` until status is terminal, then start your new run. You can also cancel the active run from the dashboard.
 
-## Polling vs webhooks
+---
 
-- **Poll:** `GET /api/v1/runs/{id}` until `status` ∈ `success` \| `failed` \| `partial`.
-- **Push:** configure `webhookUrl` on the workflow (dashboard) — see [Webhooks](/webhooks).
+## Getting results
+
+<CardGroup cols={2}>
+  <Card title="Poll" icon="arrows-rotate">
+    `GET /api/v1/runs/{id}` until `data.status` is `success`, `failed`, or `partial`. The `data.nodeRuns` array has per-node output and credit cost.
+  </Card>
+  <Card title="Webhook" icon="webhook">
+    Configure a `webhookUrl` on the workflow (dashboard only) and receive `run.started`, `node.completed`, `run.completed`, and `run.failed` events in real time. See [Webhooks](/webhooks).
+  </Card>
+</CardGroup>

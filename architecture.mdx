@@ -1,74 +1,122 @@
 ---
 title: Architecture
-description: How dashboard, public API, and MCP runs share one execution engine.
+description: How the canvas, REST API, and MCP server share one execution engine built on Trigger.dev.
 ---
 
-## High-level flow
+## System overview
 
 ```mermaid
 sequenceDiagram
   participant Client as API / MCP / Dashboard
-  participant Next as galaxy-temp-backend
+  participant API as Next.js API (Vercel)
   participant DB as PostgreSQL
   participant TD as Trigger.dev
-  participant WH as Your webhook URL
+  participant WH as Your webhook endpoint
 
-  Client->>Next: POST /api/v1/runs (Bearer key)
-  Next->>DB: Create WorkflowRun + credit hold
-  Next->>TD: trigger workflow-orchestrator
-  Next->>WH: run.started (if webhook configured)
-  TD->>DB: Update nodeRuns, reconcile credits
-  TD->>WH: node.completed / run.completed
-  Client->>Next: GET /api/v1/runs/:id
-  Next->>Client: nodeRuns + outputs
+  Client->>API: POST /api/v1/runs (Bearer key)
+  API->>DB: Create WorkflowRun + credit hold
+  API->>TD: Trigger workflow-orchestrator task
+  API->>WH: run.started (if configured)
+  TD->>DB: Update NodeRun rows as nodes complete
+  TD->>WH: node.completed / run.completed / run.failed
+  Client->>API: GET /api/v1/runs/:id
+  API->>Client: Run record + nodeRuns array
 ```
+
+The canvas, REST API, and MCP server all reach the same execution path: create a `WorkflowRun` row, place a credit hold, and trigger the `workflow-orchestrator` Trigger.dev task. There is no separate execution engine per entry point.
+
+---
 
 ## Components
 
-| Layer | Location | Role |
-| --- | --- | --- |
-| Canvas UI | `galaxy-temp-frontend` | React Flow editor, Playground, Clerk auth |
-| HTTP API | `galaxy-temp-backend/app/api` | Session routes (`/api/workflows/*`) + public v1 (`/api/v1/*`) |
-| Shared node defs | `@galaxy/shared` | Zod schemas, credit `base` costs, handle types |
-| Orchestrator | `trigger/workflowOrchestrator.ts` | Topological execution, waitpoints, inline vs Trigger tasks |
-| Node tasks | `trigger/*Task.ts` | GPT Image, Kling, FFmpeg utilities, LLM calls |
-| Webhooks | `lib/webhooks.ts` + `trigger/emitWebhookTask.ts` | Signed outbound POSTs with retries |
-| Credits | `lib/credits.ts` | Microcredit ledger, hold at run start, reconcile at end |
-| MCP | `scripts/mcp-server.ts` | StdIO tools; same Prisma + orchestrator as API |
+<CardGroup cols={2}>
+  <Card title="Canvas UI" icon="browser">
+    React Flow editor, Playground tab, Clerk auth, and run history panel. Lives in `galaxy-temp-frontend`.
+  </Card>
+  <Card title="HTTP API" icon="server">
+    Session routes (`/api/*`) and public v1 routes (`/api/v1/*`). Lives in `galaxy-temp-backend/app/api`.
+  </Card>
+  <Card title="Shared node definitions" icon="cubes">
+    `@galaxy/shared` — Zod schemas, credit base costs, and handle types consumed by both repos.
+  </Card>
+  <Card title="Orchestrator" icon="diagram-project">
+    `trigger/workflowOrchestrator.ts` — topological DAG execution, Trigger.dev waitpoints, inline vs task dispatch.
+  </Card>
+  <Card title="Node tasks" icon="bolt">
+    `trigger/*Task.ts` — GPT Image 2, Kling v3, Gemini, OpenRouter, and FFmpeg utility tasks.
+  </Card>
+  <Card title="Webhooks" icon="webhook">
+    `lib/webhooks.ts` + `trigger/emitWebhookTask.ts` — signed outbound POSTs with 3-retry exponential backoff.
+  </Card>
+  <Card title="Credits" icon="coins">
+    `lib/credits.ts` — microcredit ledger: initial grant, hold on run start, reconcile on finish.
+  </Card>
+  <Card title="MCP server" icon="plug">
+    `scripts/mcp-server.ts` — StdIO adapter using the same Prisma + Trigger.dev calls as the REST API.
+  </Card>
+</CardGroup>
 
-## Coordinator pattern (not layer batching)
+---
 
-Runs use a **single orchestrator task** that walks the DAG in topological order. Heavy nodes trigger child Trigger.dev tasks and **wait** on waitpoint tokens; lightweight nodes (e.g. Request-Inputs wiring) run **inline** inside the orchestrator.
+## How the orchestrator works
 
-Implications:
+The orchestrator is a **single Trigger.dev task** per run — it does not split into per-layer batches.
 
-- One `workflowRun` row per API/MCP/dashboard execution.
-- `nodeRuns` rows are created/updated as nodes finish.
-- Failures in a child task mark the node failed and can fail the whole run.
+<Steps>
+  <Step title="Load the graph">
+    Load the workflow's `nodes` and `edges` from the database and compute topological execution order.
+  </Step>
+  <Step title="Filter by scope">
+    If scope is `partial` or `single`, filter to target `nodeIds` plus their upstream dependencies.
+  </Step>
+  <Step title="Walk the sorted list">
+    For each node in order:
+    - **Lightweight nodes** (requestInputs, response) — resolved inline. No child task is spawned.
+    - **Heavy nodes** (GPT Image 2, Kling v3, Gemini, OpenRouter, FFmpeg tasks) — dispatched as child Trigger.dev tasks. The orchestrator waits on a `waitpoint` token that the child resolves when it finishes.
+  </Step>
+  <Step title="Emit events">
+    After each node, fire a `node.completed` webhook event (if configured).
+  </Step>
+  <Step title="Reconcile and close">
+    After all nodes finish, reconcile credits and emit `run.completed` or `run.failed`.
+  </Step>
+</Steps>
+
+Because all runs share a single `WorkflowRun` row, `GET /api/v1/runs/:id` always returns consistent state regardless of who is polling.
+
+---
 
 ## Authentication split
 
-| Route prefix | Auth |
-| --- | --- |
-| `/api/v1/*` | Bearer API key (`lib/api-auth.ts` → Unkey or local hash) |
-| `/api/workflows/*`, `/api/keys/*`, `/api/credits/balance` (non-v1) | Clerk session (`auth()`) |
+There are two independent auth systems:
 
-Never send your API key to Clerk-only routes or vice versa.
+| Route prefix | Auth method |
+| --- | --- |
+| `/api/v1/*` | Bearer API key — Unkey or local SHA-256 hash |
+| `/api/workflows/*`, `/api/keys/*`, `/api/credits/*` | Clerk session cookie from the frontend |
+
+Do not send an API key to Clerk-only routes or a session cookie to `/api/v1` routes.
+
+---
 
 ## Default workflow scaffold
 
-`POST /api/v1/workflows` creates:
+`POST /api/v1/workflows` always creates the same starting graph:
 
-- `request-inputs` node (`type: requestInputs`) with one `field_text_default` text field.
-- `response` node (`type: response`) with empty `results`.
-- No edges until you connect them in the UI or via `PUT`.
+- A `requestInputs` node with one text field (`field_text_default`)
+- A `response` node with an empty `results` list
+- No edges
 
-Same defaults are used by `scripts/mcp-server.ts` `create_workflow`.
+You add nodes and edges through the canvas or by `PUT`-ing a full graph JSON to `PUT /api/v1/workflows/{id}`.
 
-## Data model (execution)
+---
 
-- **Workflow** — `nodes` / `edges` JSON, optional `webhookUrl` + `webhookSecret`.
-- **WorkflowRun** — `scope`, `status`, `inputValues`, `orchestratorRunId`.
-- **NodeRun** — per-node `inputs`, `output`, `error`, `creditCost`, `providerUsed`.
+## Data model
 
-Public `GET /api/v1/runs/:id` returns a subset of node run fields (see OpenAPI `NodeRun` schema).
+| Table | Key fields |
+| --- | --- |
+| `Workflow` | `nodes` (JSON), `edges` (JSON), `webhookUrl`, `webhookSecret` |
+| `WorkflowRun` | `scope`, `status`, `inputValues`, `orchestratorRunId` |
+| `NodeRun` | `nodeId`, `inputs`, `output`, `error`, `creditCost`, `providerUsed`, `status` |
+
+`GET /api/v1/runs/:id` returns a subset of `NodeRun` fields. Internal fields like `providerAttempts` and raw execution logs are only accessible through dashboard session routes.
