@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "name": "Galaxy Developer Docs",
-  "theme": "venus",
+  "theme": "luma",
   "colors": {
     "primary": "#4F46E5",
     "light": "#818CF8",
