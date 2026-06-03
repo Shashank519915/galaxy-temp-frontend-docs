@@ -7,7 +7,7 @@ The Galaxy backend has two independent sets of routes:
 
 <CardGroup cols={2}>
   <Card title="Public API /api/v1/*" icon="code" href="/quickstart">
-    Bearer key auth. Documented in the API Reference tab. Use for integrations, scripts, and automation.
+    Bearer key auth. Documented in the API Reference tab (`openapi.json`). Use for integrations, scripts, and automation.
   </Card>
   <Card title="Dashboard routes /api/*" icon="browser">
     Clerk session cookie auth. Documented here. Power the canvas UI — only useful if you are building a custom frontend against the same backend.
@@ -20,33 +20,91 @@ Dashboard routes do not accept Bearer API keys. They require a valid Clerk sessi
 
 ---
 
+## HTTP semantics (aligned with public v1)
+
+Dashboard routes use the same status conventions as the [public API](/quickstart) where behavior is equivalent:
+
+| Status | Meaning | Dashboard examples |
+| --- | --- | --- |
+| **201 Created** | A new resource was persisted | `POST /api/workflows`, `POST /api/workflows/import`, `POST /api/workflows/sample` (first create), `POST /api/keys` |
+| **202 Accepted** | Async work was queued; poll or subscribe for completion | `POST /api/workflows/{id}/execute` |
+| **200 OK** | Read, update, or delete succeeded | `GET` / `PATCH` / `DELETE` on workflows, `GET /api/keys`, `GET /api/credits/balance` |
+
+<Note>
+Treat any **2xx** as success in clients (`response.ok`). The canvas does not require an exact status code of `200`.
+</Note>
+
+**OpenAPI:** Only `/api/v1/*` appears in [API Reference](/api-reference) (`galaxy-docs/openapi.json`). Dashboard paths are documented on this page, not in the OpenAPI spec.
+
+---
+
 ## API key management
 
-| Method | Path | Description |
-| --- | --- | --- |
-| `GET` | `/api/keys` | List keys for the signed-in user (values masked) |
-| `POST` | `/api/keys` | Create a new key — raw token returned once |
-| `DELETE` | `/api/keys/{id}` | Revoke a key by database ID |
+| Method | Path | Status | Description |
+| --- | --- | --- | --- |
+| `GET` | `/api/keys` | 200 | List keys for the signed-in user (values masked) |
+| `POST` | `/api/keys` | **201** | Create a new key — raw `gx_...` token returned **once** in the response body |
+| `DELETE` | `/api/keys/{id}` | 200 | Revoke a key by database ID |
 
-Keys are stored as SHA-256 hashes. The full `gx_...` token is returned only in the `POST /api/keys` response body.
+Keys are stored as SHA-256 hashes. The full token is only present in the **201** response from `POST /api/keys`.
 
 ---
 
 ## Workflow management
 
-| Method | Path | Description |
-| --- | --- | --- |
-| `GET` | `/api/workflows` | List all workflows including webhook fields |
-| `POST` | `/api/workflows` | Create workflow with default scaffold |
-| `GET` | `/api/workflows/{id}` | Full graph (nodes, edges, webhook config) |
-| `PATCH` | `/api/workflows/{id}` | Update graph or metadata — same Zod rules as public `PUT` |
-| `DELETE` | `/api/workflows/{id}` | Delete workflow and run history |
-| `POST` | `/api/workflows/{id}/run` | Start a run from the dashboard |
-| `POST` | `/api/workflows/{id}/cancel` | Cancel an in-flight run |
-| `GET` | `/api/workflows/{id}/history` | Paginated run history with node-level results |
-| `POST` | `/api/workflows/import` | Import a workflow from a JSON bundle |
-| `GET` | `/api/workflows/{id}/export` | Export a workflow as a JSON bundle |
-| `GET` | `/api/workflows/sample` | Fetch a pre-built sample workflow |
+| Method | Path | Status | Description |
+| --- | --- | --- | --- |
+| `GET` | `/api/workflows` | 200 | List all workflows including webhook fields |
+| `POST` | `/api/workflows` | **201** | Create workflow with default Request-Inputs + Response scaffold |
+| `GET` | `/api/workflows/{id}` | 200 | Full graph (nodes, edges, webhook config) |
+| `PATCH` | `/api/workflows/{id}` | 200 | Update graph or metadata — same Zod rules as public `PUT` |
+| `DELETE` | `/api/workflows/{id}` | 200 | Delete workflow and run history |
+| `POST` | `/api/workflows/import` | **201** | Import a workflow from a JSON bundle (`{ "json": "<exported file>" }`) |
+| `POST` | `/api/workflows/sample` | **201** or 200 | Create or return the built-in sample workflow (`201` on first create; **200** if it already exists and is intact) |
+| `GET` | `/api/workflows/{id}/export` | 200 | Export a workflow as a JSON bundle |
+| `GET` | `/api/workflows/{id}/history` | 200 | Paginated run history with node-level results |
+| `POST` | `/api/workflows/{id}/cancel` | 200 | Cancel an in-flight run |
+
+### Start a run (canvas + playground)
+
+The canvas and playground start execution with:
+
+`POST /api/workflows/{id}/execute` → **202 Accepted**
+
+This is the dashboard equivalent of `POST /api/v1/runs`. It validates input limits, places a credit **hold**, creates a `WorkflowRun`, triggers the `workflow-orchestrator` Trigger.dev task, and returns credentials for realtime updates.
+
+**Request body** (same shape as v1 runs for scope and inputs):
+
+```json
+{
+  "scope": "full",
+  "inputValues": { "field_text_default": "..." },
+  "nodeIds": ["optional-for-partial-or-single"],
+  "existingOutputs": {}
+}
+```
+
+`scope` is `full`, `partial`, or `single`. See [Execution scopes](/execution-scopes).
+
+**202 response:**
+
+```json
+{
+  "data": {
+    "runId": "clxrun...",
+    "orchestratorRunId": "run_...",
+    "publicAccessToken": "..."
+  }
+}
+```
+
+Use `publicAccessToken` with Trigger.dev realtime (SSE) on the canvas. Poll `GET /api/workflows/{id}/history` or rely on webhooks (if configured) for a server-side view without SSE.
+
+**Common errors:** `401` unauthorized, `404` workflow not found, `409` run already in progress, `400` validation / insufficient credits.
+
+<Warning>
+**Legacy:** `POST /api/workflows/{id}/run` only creates a `WorkflowRun` row and does **not** start the orchestrator. The current UI does not call it. Prefer **`/execute`** or the public **`POST /api/v1/runs`**.
+</Warning>
 
 ---
 
@@ -54,7 +112,7 @@ Keys are stored as SHA-256 hashes. The full `gx_...` token is returned only in t
 
 There is no `/api/v1` route for webhook configuration — it is dashboard-only.
 
-`POST /api/workflows/{id}/webhook`
+`POST /api/workflows/{id}/webhook` → **200**
 
 ```json
 { "webhookUrl": "https://your-server.com/galaxy-hooks" }
@@ -69,13 +127,15 @@ There is no `/api/v1` route for webhook configuration — it is dashboard-only.
 
 The response includes both `webhookUrl` and `webhookSecret`. Store the secret securely — you need it to verify signatures. See [Webhooks](/webhooks) for the algorithm.
 
+Outbound events (`run.started`, `node.completed`, etc.) fire after a run is accepted the same way as v1 — when **`/execute`** or **`POST /api/v1/runs`** returns **202**.
+
 ---
 
 ## Credits
 
-| Method | Path | Description |
-| --- | --- | --- |
-| `GET` | `/api/credits/balance` | Balance for signed-in user (same microcredit unit as `/api/v1/credits/balance`) |
+| Method | Path | Status | Description |
+| --- | --- | --- | --- |
+| `GET` | `/api/credits/balance` | 200 | Balance for signed-in user (same microcredit unit as `/api/v1/credits/balance`) |
 
 ---
 
@@ -83,33 +143,37 @@ The response includes both `webhookUrl` and `webhookSecret`. Store the secret se
 
 Called by the canvas during and after run execution. Not intended for direct integration use.
 
-| Method | Path | Description |
-| --- | --- | --- |
-| `GET` / `POST` | `/api/workflows/{id}/node-runs` | Incremental node run state updates |
-| `POST` | `/api/workflows/{id}/node-runs/incremental` | Streaming updates during live execution |
-| `POST` | `/api/workflows/{id}/node-runs/token` | Waitpoint token exchange for Trigger.dev |
-| `POST` | `/api/workflows/{id}/runs/{runId}/reconcile` | Credit reconciliation after run completes |
-| `POST` | `/api/upload` | File upload for canvas input fields |
+| Method | Path | Status | Description |
+| --- | --- | --- | --- |
+| `POST` | `/api/workflows/{id}/node-runs` | 200 | Bulk finalize node runs (legacy edge cases without orchestrator) |
+| `POST` | `/api/workflows/{id}/node-runs/incremental` | 200 | Legacy per-node updates from client-side DAG (unused by current canvas) |
+| `POST` | `/api/workflows/{id}/node-runs/token` | 200 | Mint `publicAccessToken` to resume SSE for an active orchestrator run |
+| `POST` | `/api/workflows/{id}/runs/{runId}/reconcile` | 200 | Credit reconciliation safety net after run completes |
+| `POST` | `/api/upload` | 200 | File upload for canvas input fields (size + image dimension limits) |
 
 ---
 
-## Single-node test routes
+## Single-node test routes (legacy)
 
-For testing individual AI providers without running a full DAG:
+For debugging individual AI providers without the server orchestrator. **Not used** by the current canvas run path (`/execute` runs the full DAG on Trigger.dev).
 
-- `POST /api/execute/openrouter`
-- `POST /api/execute/gemini`
-- `POST /api/execute/crop-image`
+- `POST /api/execute/openrouter` → 200
+- `POST /api/execute/gemini` → 200
+- `POST /api/execute/crop-image` → 200
 
-These are useful for debugging provider connectivity. Auth requirements vary by route.
+Auth: Clerk session. Useful for provider connectivity checks only.
 
 ---
 
 ## Mapping to public v1
 
-| Dashboard route | Public v1 equivalent |
-| --- | --- |
-| `POST /api/workflows` | `POST /api/v1/workflows` |
-| `PATCH /api/workflows/{id}` | `PUT /api/v1/workflows/{id}` |
-| `POST /api/workflows/{id}/run` | `POST /api/v1/runs` |
-| `GET /api/credits/balance` | `GET /api/v1/credits/balance` |
+| Dashboard route | Status | Public v1 equivalent | Status |
+| --- | --- | --- | --- |
+| `POST /api/workflows` | **201** | `POST /api/v1/workflows` | **201** |
+| `POST /api/workflows/import` | **201** | — (no v1 import; use `POST /api/v1/workflows` with full graph) | — |
+| `PATCH /api/workflows/{id}` | 200 | `PUT /api/v1/workflows/{id}` | 200 |
+| `POST /api/workflows/{id}/execute` | **202** | `POST /api/v1/runs` | **202** |
+| `GET /api/credits/balance` | 200 | `GET /api/v1/credits/balance` | 200 |
+| `POST /api/keys` | **201** | — (keys are dashboard-only) | — |
+
+Poll run results: use `GET /api/workflows/{id}/history` in the dashboard, or `GET /api/v1/runs/{runId}` with a Bearer key for integrations.
