@@ -3,7 +3,7 @@ title: MCP Server
 description: Use Galaxy from Cursor or Claude Desktop via the Model Context Protocol — no cloning required.
 ---
 
-The Galaxy MCP server exposes workflow operations as tools for AI assistants. It calls the same hosted REST API (`https://galaxy-temp-frontend.vercel.app/api/v1`) that you use directly — no local database, no backend clone, just your API key.
+The Galaxy MCP server exposes workflow operations as tools for AI assistants. It is **hosted** — your client connects to a URL with your API key as a Bearer token. No clone, no script path, no local process, no database. Tools call the same public REST API (`https://galaxy-temp-frontend.vercel.app/api/v1`) you use directly, so auth, credits, and responses are identical.
 
 ---
 
@@ -29,9 +29,9 @@ The Galaxy MCP server exposes workflow operations as tools for AI assistants. It
 ## Prerequisites
 
 - A `gx_` API key — create one in the **Settings** modal in the left sidebar of the canvas.
-- `node` (v18+) and `npx` on your PATH — that's it.
+- An MCP client that supports remote (HTTP) servers — e.g. Cursor or Claude Desktop.
 
-No local clone. No `DATABASE_URL`. No Trigger.dev credentials.
+No local clone. No script path. No `DATABASE_URL`. No Trigger.dev credentials.
 
 ---
 
@@ -43,6 +43,14 @@ Sign into the canvas at `https://galaxy-temp-frontend.vercel.app`, open **Settin
 
 ## 2. Connect your client
 
+The server lives at:
+
+```
+https://galaxy-temp-frontend.vercel.app/api/mcp
+```
+
+Pass your API key as a Bearer token in the `headers` block — that's the only configuration.
+
 <Tabs>
   <Tab title="Cursor">
     Edit `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (per-project):
@@ -51,17 +59,14 @@ Sign into the canvas at `https://galaxy-temp-frontend.vercel.app`, open **Settin
     {
       "mcpServers": {
         "galaxy": {
-          "command": "npx",
-          "args": ["tsx", "/absolute/path/to/galaxy-temp-backend/scripts/mcp-server-http.ts"],
-          "env": {
-            "GALAXY_API_KEY": "gx_your_key_here"
+          "url": "https://galaxy-temp-frontend.vercel.app/api/mcp",
+          "headers": {
+            "Authorization": "Bearer gx_your_key_here"
           }
         }
       }
     }
     ```
-
-    `GALAXY_BASE_URL` defaults to `https://galaxy-temp-frontend.vercel.app` — omit it unless you are running a local backend.
 
     Restart Cursor after saving. The Galaxy tools appear in the MCP panel.
   </Tab>
@@ -75,10 +80,9 @@ Sign into the canvas at `https://galaxy-temp-frontend.vercel.app`, open **Settin
     {
       "mcpServers": {
         "galaxy": {
-          "command": "npx",
-          "args": ["tsx", "/path/to/galaxy-temp-backend/scripts/mcp-server-http.ts"],
-          "env": {
-            "GALAXY_API_KEY": "gx_your_key_here"
+          "url": "https://galaxy-temp-frontend.vercel.app/api/mcp",
+          "headers": {
+            "Authorization": "Bearer gx_your_key_here"
           }
         }
       }
@@ -95,10 +99,13 @@ Sign into the canvas at `https://galaxy-temp-frontend.vercel.app`, open **Settin
 
 Ask your AI assistant: *"List my Galaxy workflows."*
 
-Or test from a terminal:
+Or test the endpoint directly with `curl` (a `tools/list` JSON-RPC call):
 
 ```bash
-GALAXY_API_KEY=gx_your_key_here npx tsx scripts/mcp-server-http.ts
+curl -s https://galaxy-temp-frontend.vercel.app/api/mcp \
+  -H "Authorization: Bearer gx_your_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
 ---
@@ -151,12 +158,16 @@ get_run_status(runId: "clxrun...")
 
 ## Pointing at a local backend
 
-If you are running the backend locally, add `GALAXY_BASE_URL` to the env block:
+Running Galaxy locally? Point the `url` at your local server instead:
 
 ```json
-"env": {
-  "GALAXY_API_KEY": "gx_mock_your_key",
-  "GALAXY_BASE_URL": "http://localhost:3000"
+{
+  "mcpServers": {
+    "galaxy": {
+      "url": "http://localhost:3000/api/mcp",
+      "headers": { "Authorization": "Bearer gx_mock_your_key" }
+    }
+  }
 }
 ```
 
@@ -166,8 +177,8 @@ If you are running the backend locally, add `GALAXY_BASE_URL` to the env block:
 
 | Symptom | Fix |
 | --- | --- |
-| `GALAXY_API_KEY is not set` | Add `GALAXY_API_KEY` to the `env` block in your MCP config |
-| `Invalid GALAXY_API_KEY` | Key may be wrong or revoked — create a new one in the canvas Settings |
+| `Missing API key` | Add the `Authorization: Bearer gx_...` entry to the `headers` block of your server config |
+| `Invalid API key` | Key may be wrong or revoked — create a new one in the canvas Settings |
 | Run stays `running` indefinitely | Check the Trigger.dev dashboard; confirm the worker is connected |
 | Insufficient credits error | Call `get_balance` before running expensive graphs |
-| Tools not visible in Cursor | Restart Cursor after editing `mcp.json`; verify `tsx` is on your PATH |
+| Tools not visible in Cursor | Restart Cursor after editing `mcp.json`; confirm the `url` is reachable |
