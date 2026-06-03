@@ -196,7 +196,13 @@
                 "workflowId": "clxwf0000000001",
                 "scope": "full",
                 "inputValues": {
-                  "field_text_default": "A retro synthwave racing car at sunset"
+                  "field_text_prompt": "A retro synthwave racing car at sunset",
+                  "field_image_main": "https://cdn.example.com/photo.jpg",
+                  "field_video_clip": "https://cdn.example.com/clip.mp4",
+                  "field_number_strength": "5",
+                  "field_boolean_flag": "false",
+                  "field_select_transition": "dissolve",
+                  "field_select_format": "mp3"
                 }
               }
             }
@@ -456,8 +462,19 @@
           },
           "inputValues": {
             "type": "object",
-            "additionalProperties": true,
-            "description": "Keyed by Request-Inputs field `id` (e.g. `field_text_default`). Overlays values at run start."
+            "additionalProperties": {
+              "oneOf": [
+                { "type": "string" },
+                { "type": "number" },
+                { "type": "boolean" }
+              ]
+            },
+            "description": "Keyed by Request-Inputs field `id` from the workflow graph (canvas fields and **Add to request** promoted fields). Strings are typical: comma-separated URLs for multi-image/video, `true`/`false` for booleans, option values for `select_field` (e.g. `mp3`, `wav`, `aac` for extract format — defaults to `mp3` if omitted).",
+            "example": {
+              "field_text_prompt": "Hello",
+              "field_select_format": "mp3",
+              "field_image_main": "https://cdn.example.com/a.jpg,https://cdn.example.com/b.jpg"
+            }
           },
           "nodeIds": {
             "type": "array",

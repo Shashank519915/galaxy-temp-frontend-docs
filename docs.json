@@ -1,11 +1,16 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "name": "Galaxy Developer Docs",
+  "name": "nextfloe",
   "theme": "luma",
   "colors": {
     "primary": "#4F46E5",
     "light": "#818CF8",
     "dark": "#312E81"
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg",
+    "href": "https://galaxy-temp-frontend.vercel.app"
   },
   "favicon": "/favicon.svg",
   "navbar": {

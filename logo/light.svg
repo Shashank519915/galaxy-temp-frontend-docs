@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 52" fill="none" height="52">
+  <!-- Logo mark: hexagonal flow node, centred vertically in 52px -->
+  <g transform="translate(4, 8)">
+    <!-- Outer hex ring -->
+    <polygon points="18,0 34,9 34,27 18,36 2,27 2,9" fill="#4F46E5" opacity="0.15"/>
+    <!-- Inner hex fill -->
+    <polygon points="18,5 29,11.5 29,24.5 18,31 7,24.5 7,11.5" fill="#4F46E5" opacity="0.3"/>
+    <!-- Center diamond -->
+    <polygon points="18,10 24,18 18,26 12,18" fill="#4F46E5"/>
+    <!-- Flow arrows -->
+    <line x1="18" y1="10" x2="18" y2="6" stroke="#4F46E5" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="18" y1="26" x2="18" y2="30" stroke="#4F46E5" stroke-width="1.5" stroke-linecap="round"/>
+  </g>
+  <!-- Wordmark: "nextfloe" in dark indigo, vertically centred -->
+  <text x="52" y="33" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif" font-size="20" font-weight="700" letter-spacing="-0.5" fill="#1e1b4b">nextfloe</text>
+</svg>
