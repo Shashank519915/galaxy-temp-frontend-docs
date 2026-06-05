@@ -97,9 +97,14 @@ Pass your API key as a Bearer token in the `headers` block — that's the only c
 
 ## 3. Verify it works
 
-Ask your AI assistant: *"List my Galaxy workflows."*
+In Cursor, confirm **galaxy** shows six tools in **Settings → MCP** (green connected state).
 
-Or test the endpoint directly with `curl` (a `tools/list` JSON-RPC call):
+Then ask in chat:
+
+- *"Use Galaxy to list my workflows."*
+- *"What's my Galaxy credit balance?"*
+
+Or test with `curl`:
 
 ```bash
 curl -s https://galaxy-temp-frontend.vercel.app/api/mcp \
@@ -112,31 +117,60 @@ curl -s https://galaxy-temp-frontend.vercel.app/api/mcp \
 
 ## Available tools
 
-| Tool | What it does | REST equivalent |
-| --- | --- | --- |
-| `list_workflows` | Metadata for all workflows owned by the key's user | `GET /api/v1/workflows` |
-| `get_workflow` | Full `nodes` and `edges` JSON for one workflow | `GET /api/v1/workflows/{id}` |
-| `create_workflow` | New workflow with default scaffold | `POST /api/v1/workflows` |
-| `start_run` | Full-scope run — returns a `runId` to poll | `POST /api/v1/runs` |
-| `get_run_status` | Run record plus per-node results | `GET /api/v1/runs/{id}` |
-| `get_balance` | Microcredit balance | `GET /api/v1/credits/balance` |
+Six tools are exposed. Each maps to the public REST API on the same host (`/api/v1/...`).
 
-### start_run
+| Tool | Description | REST equivalent |
+| --- | --- | --- |
+| `list_workflows` | List workflow metadata (id, name, status) for your account | `GET /api/v1/workflows` |
+| `get_workflow` | Full graph JSON (`nodes`, `edges`) for one workflow | `GET /api/v1/workflows/{id}` |
+| `create_workflow` | Create a new canvas with default Request-Inputs + Response nodes | `POST /api/v1/workflows` |
+| `start_run` | Start a full-scope run; returns a `runId` to poll | `POST /api/v1/runs` |
+| `get_run_status` | Run status, credits, and per-node outputs/errors | `GET /api/v1/runs/{id}` |
+| `get_balance` | Current microcredit balance | `GET /api/v1/credits/balance` |
+
+### `list_workflows`
+
+No arguments. Returns an array of workflow summaries.
+
+### `get_workflow`
 
 | Argument | Required | Description |
 | --- | --- | --- |
-| `workflowId` | Yes | ID of the workflow to run |
-| `inputValues` | No | Flat object mapping Request-Inputs field IDs to values, e.g. `{ "field_text_default": "Hello" }` |
+| `workflowId` | Yes | Workflow ID from `list_workflows` |
 
-### create_workflow
+### `create_workflow`
 
-Creates the same default scaffold as `POST /api/v1/workflows`:
+| Argument | Required | Description |
+| --- | --- | --- |
+| `name` | Yes | Display name for the new workflow |
+| `description` | No | Optional description |
 
-- One `requestInputs` node with a `field_text_default` text field
-- One `response` node with empty results
-- No edges
+Creates the same default scaffold as the REST API:
 
-After creating via MCP, open the canvas to build the full graph visually.
+- `requestInputs` node with one `field_text_default` text field
+- `response` node with empty results
+- No edges — connect and build the graph in the canvas after creation
+
+### `start_run`
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `workflowId` | Yes | Workflow to execute |
+| `inputValues` | No | Request-Inputs field values, e.g. `{ "field_text_default": "Hello world" }` |
+
+Runs the full workflow (same as Playground **Run**). Deducts credits and executes on Trigger.dev in the background.
+
+### `get_run_status`
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `runId` | Yes | Run ID returned by `start_run` |
+
+Poll until `status` is `success` or `failed`. Response includes `nodeRuns` with per-node `output`, `error`, and `creditCost`.
+
+### `get_balance`
+
+No arguments. Returns `microcredits` and a human-readable `credits` string (millions).
 
 ---
 
@@ -156,15 +190,15 @@ get_run_status(runId: "clxrun...")
 
 ---
 
-## Pointing at a local backend
+## Local development
 
-Running Galaxy locally? Point the `url` at your local server instead:
+With the frontend dev server (`http://localhost:3001`), use the same path — it proxies `/api/mcp` to your local backend:
 
 ```json
 {
   "mcpServers": {
     "galaxy": {
-      "url": "http://localhost:3000/api/mcp",
+      "url": "http://localhost:3001/api/mcp",
       "headers": { "Authorization": "Bearer gx_mock_your_key" }
     }
   }
@@ -177,26 +211,8 @@ Running Galaxy locally? Point the `url` at your local server instead:
 
 | Symptom | Fix |
 | --- | --- |
-| **404 HTML page** (`This page could not be found`) | The frontend was blocking `/api/mcp` behind Clerk. Deploy the latest frontend, or point `url` at the backend directly: `https://galaxy-temp-backend.vercel.app/api/mcp` |
-| `Missing API key` | Add the `Authorization: Bearer gx_...` entry to the `headers` block of your server config |
-| `Invalid API key` | Key may be wrong or revoked — create a new one in the canvas Settings |
-| Run stays `running` indefinitely | Check the Trigger.dev dashboard; confirm the worker is connected |
-| Insufficient credits error | Call `get_balance` before running expensive graphs |
-| Tools not visible in Cursor | Restart Cursor after editing `mcp.json`; confirm the `url` is reachable |
-
-### Direct backend URL (fallback)
-
-If the frontend proxy is not yet deployed, use the backend host — same Bearer token, same tools:
-
-```json
-{
-  "mcpServers": {
-    "galaxy": {
-      "url": "https://galaxy-temp-backend.vercel.app/api/mcp",
-      "headers": {
-        "Authorization": "Bearer gx_your_key_here"
-      }
-    }
-  }
-}
-```
+| `Missing API key` | Add `"Authorization": "Bearer gx_..."` under `headers` in your MCP config |
+| `Invalid API key` | Create a new key in **Settings → API Keys** |
+| Run stays `running` | Poll `get_run_status` again; long graphs can take minutes |
+| Insufficient credits | Call `get_balance` first |
+| Tools not visible | Restart Cursor after saving `mcp.json` |
