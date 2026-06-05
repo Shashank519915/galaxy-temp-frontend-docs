@@ -70,15 +70,29 @@
         "tags": ["Workflows"],
         "operationId": "createWorkflow",
         "summary": "Create workflow",
-        "description": "Creates a workflow owned by the caller with default **Request-Inputs** and **Response** nodes (`requestInputs` + `response`). No edges are created by default.",
+        "description": "Creates a workflow owned by the caller. By default (`template` omitted or `empty`) the graph is a blank scaffold: **Request-Inputs** + **Response** nodes with no edges. Use `template: \"advertisement\"` to provision a pre-built marketing pipeline (crop images → LLM copy → social post) and optionally seed product details via `productBrief`.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": { "$ref": "#/components/schemas/CreateWorkflowRequest" },
-              "example": {
-                "name": "My Image Pipeline",
-                "description": "GPT Image 2 → Response"
+              "examples": {
+                "empty": {
+                  "summary": "Blank canvas",
+                  "value": {
+                    "name": "My Image Pipeline",
+                    "description": "GPT Image 2 → Response"
+                  }
+                },
+                "advertisement": {
+                  "summary": "Marketing / promotion template",
+                  "value": {
+                    "name": "T-Shirt Promo Ads",
+                    "description": "Advertisement workflow for t-shirt company promotions",
+                    "template": "advertisement",
+                    "productBrief": "T-shirt company: summer sale on graphic tees, 20% off limited designs"
+                  }
+                }
               }
             }
           }
@@ -422,12 +436,23 @@
           }
         ]
       },
+      "WorkflowTemplate": {
+        "type": "string",
+        "enum": ["empty", "advertisement"],
+        "description": "Graph scaffold. `empty` (default) = Request-Inputs + Response only. `advertisement` = marketing pipeline with crop + OpenRouter LLM nodes and wired edges."
+      },
       "CreateWorkflowRequest": {
         "type": "object",
         "required": ["name"],
         "properties": {
           "name": { "type": "string", "minLength": 1, "maxLength": 120 },
-          "description": { "type": "string", "maxLength": 5000 }
+          "description": { "type": "string", "maxLength": 5000 },
+          "template": { "$ref": "#/components/schemas/WorkflowTemplate" },
+          "productBrief": {
+            "type": "string",
+            "maxLength": 5000,
+            "description": "Product or promotion details seeded into the advertisement template's Request-Inputs text field (`field_text_1`). Ignored when `template` is omitted or `empty`."
+          }
         }
       },
       "UpdateWorkflowRequest": {
