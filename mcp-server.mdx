@@ -177,8 +177,26 @@ Running Galaxy locally? Point the `url` at your local server instead:
 
 | Symptom | Fix |
 | --- | --- |
+| **404 HTML page** (`This page could not be found`) | The frontend was blocking `/api/mcp` behind Clerk. Deploy the latest frontend, or point `url` at the backend directly: `https://galaxy-temp-backend.vercel.app/api/mcp` |
 | `Missing API key` | Add the `Authorization: Bearer gx_...` entry to the `headers` block of your server config |
 | `Invalid API key` | Key may be wrong or revoked — create a new one in the canvas Settings |
 | Run stays `running` indefinitely | Check the Trigger.dev dashboard; confirm the worker is connected |
 | Insufficient credits error | Call `get_balance` before running expensive graphs |
 | Tools not visible in Cursor | Restart Cursor after editing `mcp.json`; confirm the `url` is reachable |
+
+### Direct backend URL (fallback)
+
+If the frontend proxy is not yet deployed, use the backend host — same Bearer token, same tools:
+
+```json
+{
+  "mcpServers": {
+    "galaxy": {
+      "url": "https://galaxy-temp-backend.vercel.app/api/mcp",
+      "headers": {
+        "Authorization": "Bearer gx_your_key_here"
+      }
+    }
+  }
+}
+```
